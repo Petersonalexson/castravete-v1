@@ -11,6 +11,8 @@ Public Sub ImportXRPDataAsArrays()
     Dim wsProcessLog As Worksheet
     Dim treeArrayName As String
     Dim listArrayName As String
+    Dim treeHeadersName As String
+    Dim listHeadersName As String
     Dim logRow As Long
     
     ' Create or get ProcessLog2 sheet
@@ -39,6 +41,10 @@ Public Sub ImportXRPDataAsArrays()
     ' Use default names if not found
     If treeArrayName = "" Then treeArrayName = "XRP_Tree_Array"
     If listArrayName = "" Then listArrayName = "XRP_List_Array"
+    
+    ' Header array names
+    treeHeadersName = treeArrayName & "_Headers"
+    listHeadersName = listArrayName & "_Headers"
     On Error GoTo 0
     
     ' Start logging
@@ -54,10 +60,10 @@ Public Sub ImportXRPDataAsArrays()
     logRow = logRow + 1
     
     ' Import Tree data
-    ImportTreeData XRP_TREE_PATH, treeArrayName, wsProcessLog, logRow
+    ImportTreeData XRP_TREE_PATH, treeArrayName, treeHeadersName, wsProcessLog, logRow
     
     ' Import List data
-    ImportListData XRP_LIST_PATH, listArrayName, wsProcessLog, logRow
+    ImportListData XRP_LIST_PATH, listArrayName, listHeadersName, wsProcessLog, logRow
     
     ' Final log entry
     logRow = wsProcessLog.Cells(wsProcessLog.Rows.Count, "A").End(xlUp).Row + 1
@@ -81,13 +87,14 @@ End Sub
 '==========================================================
 ' IMPORT TREE DATA
 '==========================================================
-Private Sub ImportTreeData(treeFilePath As String, arrayName As String, logSheet As Worksheet, ByRef logRow As Long)
+Private Sub ImportTreeData(treeFilePath As String, arrayName As String, headersArrayName As String, logSheet As Worksheet, ByRef logRow As Long)
     On Error GoTo ErrorHandler
     
     Dim treeWB As Workbook
     Dim treeSheet As Worksheet
     Dim lastRow As Long, lastCol As Long
     Dim treeArray As Variant
+    Dim headersArray As Variant
     Dim i As Long, j As Long
     
     ' Log start
@@ -106,7 +113,7 @@ Private Sub ImportTreeData(treeFilePath As String, arrayName As String, logSheet
     Set treeWB = Workbooks.Open(treeFilePath, ReadOnly:=True)
     Set treeSheet = treeWB.Sheets(1)
     
-    ' Find data range using headers in row 5
+    ' Find data range - headers are in row 5
     lastRow = treeSheet.Cells(treeSheet.Rows.Count, "A").End(xlUp).Row
     lastCol = treeSheet.Cells(5, treeSheet.Columns.Count).End(xlToLeft).Column
     
@@ -124,7 +131,15 @@ Private Sub ImportTreeData(treeFilePath As String, arrayName As String, logSheet
         GoTo CloseTree
     End If
     
-    ' Create array
+    ' Create headers array
+    ReDim headersArray(1 To 1, 1 To lastCol)
+    
+    ' Extract headers from row 5
+    For j = 1 To lastCol
+        headersArray(1, j) = treeSheet.Cells(5, j).Value
+    Next j
+    
+    ' Create data array (rows 6 to last row)
     ReDim treeArray(1 To lastRow - 5, 1 To lastCol)
     
     ' Load array with data (from row 6 to last row, all columns)
@@ -134,12 +149,14 @@ Private Sub ImportTreeData(treeFilePath As String, arrayName As String, logSheet
         Next j
     Next i
     
-    ' Create named item for the array
+    ' Create named items for headers and data arrays
     On Error Resume Next
+    ThisWorkbook.Names(headersArrayName).Delete
     ThisWorkbook.Names(arrayName).Delete
     On Error GoTo ErrorHandler
     
-    ' Create the array as a named item
+    ' Create the arrays as named items
+    ThisWorkbook.Names.Add Name:=headersArrayName, RefersToR1C1:=headersArray
     ThisWorkbook.Names.Add Name:=arrayName, RefersToR1C1:=treeArray
     
     ' Log success
@@ -149,7 +166,17 @@ Private Sub ImportTreeData(treeFilePath As String, arrayName As String, logSheet
         .Cells(logRow, 3) = arrayName
         .Cells(logRow, 4) = "Import Completed"
         .Cells(logRow, 5) = "SUCCESS"
-        .Cells(logRow, 6) = "Imported " & (lastRow - 5) & " rows × " & lastCol & " columns"
+        .Cells(logRow, 6) = "Imported " & lastCol & " columns × " & (lastRow - 5) & " rows"
+    End With
+    logRow = logRow + 1
+    
+    With logSheet
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "XRP Tree"
+        .Cells(logRow, 3) = headersArrayName
+        .Cells(logRow, 4) = "Headers Imported"
+        .Cells(logRow, 5) = "SUCCESS"
+        .Cells(logRow, 6) = "Imported " & lastCol & " header columns from row 5"
     End With
     logRow = logRow + 1
     
@@ -179,13 +206,14 @@ End Sub
 '==========================================================
 ' IMPORT LIST DATA
 '==========================================================
-Private Sub ImportListData(listFilePath As String, arrayName As String, logSheet As Worksheet, ByRef logRow As Long)
+Private Sub ImportListData(listFilePath As String, arrayName As String, headersArrayName As String, logSheet As Worksheet, ByRef logRow As Long)
     On Error GoTo ErrorHandler
     
     Dim listWB As Workbook
     Dim listSheet As Worksheet
     Dim lastRow As Long, lastCol As Long
     Dim listArray As Variant
+    Dim headersArray As Variant
     Dim i As Long, j As Long
     
     ' Log start
@@ -204,7 +232,7 @@ Private Sub ImportListData(listFilePath As String, arrayName As String, logSheet
     Set listWB = Workbooks.Open(listFilePath, ReadOnly:=True)
     Set listSheet = listWB.Sheets(1)
     
-    ' Find data range using headers in row 4
+    ' Find data range - headers are in row 4
     lastRow = listSheet.Cells(listSheet.Rows.Count, "A").End(xlUp).Row
     lastCol = listSheet.Cells(4, listSheet.Columns.Count).End(xlToLeft).Column
     
@@ -222,7 +250,15 @@ Private Sub ImportListData(listFilePath As String, arrayName As String, logSheet
         GoTo CloseList
     End If
     
-    ' Create array
+    ' Create headers array
+    ReDim headersArray(1 To 1, 1 To lastCol)
+    
+    ' Extract headers from row 4
+    For j = 1 To lastCol
+        headersArray(1, j) = listSheet.Cells(4, j).Value
+    Next j
+    
+    ' Create data array (rows 5 to last row)
     ReDim listArray(1 To lastRow - 4, 1 To lastCol)
     
     ' Load array with data (from row 5 to last row, all columns)
@@ -232,12 +268,14 @@ Private Sub ImportListData(listFilePath As String, arrayName As String, logSheet
         Next j
     Next i
     
-    ' Create named item for the array
+    ' Create named items for headers and data arrays
     On Error Resume Next
+    ThisWorkbook.Names(headersArrayName).Delete
     ThisWorkbook.Names(arrayName).Delete
     On Error GoTo ErrorHandler
     
-    ' Create the array as a named item
+    ' Create the arrays as named items
+    ThisWorkbook.Names.Add Name:=headersArrayName, RefersToR1C1:=headersArray
     ThisWorkbook.Names.Add Name:=arrayName, RefersToR1C1:=listArray
     
     ' Log success
@@ -247,7 +285,17 @@ Private Sub ImportListData(listFilePath As String, arrayName As String, logSheet
         .Cells(logRow, 3) = arrayName
         .Cells(logRow, 4) = "Import Completed"
         .Cells(logRow, 5) = "SUCCESS"
-        .Cells(logRow, 6) = "Imported " & (lastRow - 4) & " rows × " & lastCol & " columns"
+        .Cells(logRow, 6) = "Imported " & lastCol & " columns × " & (lastRow - 4) & " rows"
+    End With
+    logRow = logRow + 1
+    
+    With logSheet
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "XRP List"
+        .Cells(logRow, 3) = headersArrayName
+        .Cells(logRow, 4) = "Headers Imported"
+        .Cells(logRow, 5) = "SUCCESS"
+        .Cells(logRow, 6) = "Imported " & lastCol & " header columns from row 4"
     End With
     logRow = logRow + 1
     
