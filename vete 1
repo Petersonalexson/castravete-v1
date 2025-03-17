@@ -1,7 +1,63 @@
 Option Explicit
 
 '==========================================================
-' MAIN: Create arrays from Smart View hierarchies
+' MAIN: Refresh Smart View hierarchies, then create arrays
+'==========================================================
+Public Sub RefreshSmartViewAndCreateArrays()
+    RefreshSmartViewTree
+    CreateHierarchyArrays
+End Sub
+
+'==========================================================
+' REFRESH SMART VIEW HIERARCHIES - ORIGINAL WORKING VERSION
+'==========================================================
+Public Sub RefreshSmartViewTree()
+    Dim arrSheets As Variant
+    Dim ws As Worksheet
+    Dim wsLists As Worksheet
+    Dim ConnectionName As String
+    Dim Ret As Long, HeaderRow As Long, LastRow As Long, I As Long
+    Dim ConnStatus As Integer
+    
+    Set wsLists = ThisWorkbook.Worksheets("Lists")
+    
+    With wsLists
+        ConnectionName = .Range("nmConnectionName").Value
+        arrSheets = .Range("Hierarchy_Matrix").Value
+    End With
+    
+    HeaderRow = 4
+    
+    For I = LBound(arrSheets) To UBound(arrSheets)
+        Set ws = ThisWorkbook.Worksheets(arrSheets(I, 1))
+        With ws
+            Ret = HypUIConnect(.Name, "", "", ConnectionName)
+            ConnStatus = HypConnected(.Name)
+            If ConnStatus <> -1 Then Stop
+            'Calculate last row
+            LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
+            'Delete hierarchy rows except hierarchy name
+            If LastRow > HeaderRow Then
+                .Rows(HeaderRow & ":" & LastRow - 1).Delete Shift:=xlUp
+            End If
+            LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
+            Ret = HypSetSheetOption(.Name, HYP_SVC_OPTIONS_INDEX.HSV_MEMBER_DISPLAY, 1)
+            Ret = HypZoomIn(.Name, .Range("A" & LastRow), 1, False)
+            LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
+            
+            ' Delete the named range if it exists
+            On Error Resume Next
+            ThisWorkbook.Names(arrSheets(I, 2)).Delete
+            On Error GoTo 0
+            
+            ThisWorkbook.Names.Add Name:=arrSheets(I, 2), RefersTo:=.Range("A" & HeaderRow & ":A" & LastRow)
+        End With
+    Next I
+End Sub
+
+'==========================================================
+' CREATE HIERARCHY ARRAYS
+' Creates arrays from row 3 to last row for each hierarchy
 '==========================================================
 Public Sub CreateHierarchyArrays()
     Dim wsLists As Worksheet
@@ -76,33 +132,4 @@ Private Function CreateHierarchyArray(rangeName As String) As Variant
         ' Not enough rows
         CreateHierarchyArray = Empty
     End If
-End Function
-
-'==========================================================
-' FUNCTION: GET ERP HIERARCHY SMART VIEW PARENT
-' Find the parent of a hierarchy member based on indentation
-'==========================================================
-Public Function fnGetERPHierarchySmartViewParent(rng As Range, currentIndex As Long, _
-                                                 currentIndent As Long, maxRow As Long) As String
-    Dim i As Long
-    Dim parentIndent As Long
-    Dim parent As String
-    
-    ' Default return value
-    fnGetERPHierarchySmartViewParent = ""
-    
-    ' Find parent by looking at items below with lower indentation
-    For i = currentIndex + 1 To maxRow
-        If i > rng.Rows.Count Then Exit For
-        
-        ' Calculate indentation of potential parent
-        parentIndent = Len(rng.Cells(i, 1).Value) - Len(LTrim(rng.Cells(i, 1).Value))
-        
-        ' If we find an item with lower indentation, it's the parent
-        If parentIndent < currentIndent Then
-            parent = Trim(rng.Cells(i, 1).Value)
-            fnGetERPHierarchySmartViewParent = parent
-            Exit Function
-        End If
-    Next i
 End Function
