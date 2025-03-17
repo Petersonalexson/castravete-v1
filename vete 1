@@ -1,0 +1,108 @@
+Option Explicit
+
+'==========================================================
+' MAIN: Create arrays from Smart View hierarchies
+'==========================================================
+Public Sub CreateHierarchyArrays()
+    Dim wsLists As Worksheet
+    Dim arrSheets As Variant
+    Dim hierarchyArrays As Object
+    Dim i As Long
+    
+    ' Create dictionary to store arrays
+    Set hierarchyArrays = CreateObject("Scripting.Dictionary")
+    
+    ' Get hierarchy matrix from Lists worksheet
+    Set wsLists = ThisWorkbook.Worksheets("Lists")
+    arrSheets = wsLists.Range("Hierarchy_Matrix").Value
+    
+    ' Process each hierarchy in the matrix
+    For i = LBound(arrSheets) To UBound(arrSheets)
+        Dim sheetName As String
+        Dim rangeName As String
+        Dim hierarchyName As String
+        
+        sheetName = Trim(arrSheets(i, 1))
+        rangeName = Trim(arrSheets(i, 2))
+        hierarchyName = Trim(arrSheets(i, 3))
+        
+        ' Skip if empty
+        If sheetName <> "" And rangeName <> "" Then
+            ' Create array for this hierarchy
+            Dim hierarchyArray As Variant
+            hierarchyArray = CreateHierarchyArray(rangeName)
+            
+            ' Store array in dictionary with hierarchy name as key
+            If Not IsEmpty(hierarchyArray) Then
+                hierarchyArrays.Add hierarchyName, hierarchyArray
+            End If
+        End If
+    Next i
+    
+    ' Show confirmation
+    MsgBox "Created " & hierarchyArrays.Count & " hierarchy arrays", vbInformation
+End Sub
+
+'==========================================================
+' CREATE HIERARCHY ARRAY
+' Creates an array from row 3 to last row of a named range
+'==========================================================
+Private Function CreateHierarchyArray(rangeName As String) As Variant
+    Dim rng As Range
+    Dim dataArray As Variant
+    Dim startRow As Long
+    Dim endRow As Long
+    
+    On Error Resume Next
+    Set rng = ThisWorkbook.Names(rangeName).RefersToRange
+    If rng Is Nothing Then
+        ' Named range doesn't exist
+        CreateHierarchyArray = Empty
+        Exit Function
+    End If
+    On Error GoTo 0
+    
+    ' Get start and end rows for the range (start from row 3)
+    startRow = 3
+    endRow = rng.Rows.Count
+    
+    ' Create array from row 3 to last row
+    If endRow >= startRow Then
+        Dim adjustedRange As Range
+        Set adjustedRange = rng.Worksheet.Range(rng.Cells(startRow, 1), rng.Cells(endRow, 1))
+        dataArray = adjustedRange.Value
+        CreateHierarchyArray = dataArray
+    Else
+        ' Not enough rows
+        CreateHierarchyArray = Empty
+    End If
+End Function
+
+'==========================================================
+' FUNCTION: GET ERP HIERARCHY SMART VIEW PARENT
+' Find the parent of a hierarchy member based on indentation
+'==========================================================
+Public Function fnGetERPHierarchySmartViewParent(rng As Range, currentIndex As Long, _
+                                                 currentIndent As Long, maxRow As Long) As String
+    Dim i As Long
+    Dim parentIndent As Long
+    Dim parent As String
+    
+    ' Default return value
+    fnGetERPHierarchySmartViewParent = ""
+    
+    ' Find parent by looking at items below with lower indentation
+    For i = currentIndex + 1 To maxRow
+        If i > rng.Rows.Count Then Exit For
+        
+        ' Calculate indentation of potential parent
+        parentIndent = Len(rng.Cells(i, 1).Value) - Len(LTrim(rng.Cells(i, 1).Value))
+        
+        ' If we find an item with lower indentation, it's the parent
+        If parentIndent < currentIndent Then
+            parent = Trim(rng.Cells(i, 1).Value)
+            fnGetERPHierarchySmartViewParent = parent
+            Exit Function
+        End If
+    Next i
+End Function
