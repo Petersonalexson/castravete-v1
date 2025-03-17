@@ -1,17 +1,17 @@
 Option Explicit
 
 '==========================================================
-' MAIN: Refresh Smart View and create arrays
+' MAIN: Refresh SmartView and create arrays
 '==========================================================
-Public Sub RefreshSmartViewAndCreateArrays()
-    RefreshSmartViewTree
-    CreateHierarchyArrays
+Public Sub ZoomInAndCreateArrays()
+    RefreshSmartView
+    CreateSimpleArrays
 End Sub
 
 '==========================================================
-' REFRESH SMART VIEW HIERARCHIES
+' REFRESH SMARTVIEW - ZOOM IN ONLY
 '==========================================================
-Public Sub RefreshSmartViewTree()
+Public Sub RefreshSmartView()
     Dim arrSheets As Variant
     Dim ws As Worksheet
     Dim wsLists As Worksheet
@@ -34,12 +34,15 @@ Public Sub RefreshSmartViewTree()
             Ret = HypUIConnect(.Name, "", "", ConnectionName)
             ConnStatus = HypConnected(.Name)
             If ConnStatus <> -1 Then Stop
+            
             'Calculate last row
             LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
+            
             'Delete hierarchy rows except hierarchy name
             If LastRow > HeaderRow Then
                 .Rows(HeaderRow & ":" & LastRow - 1).Delete Shift:=xlUp
             End If
+            
             LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
             Ret = HypSetSheetOption(.Name, HYP_SVC_OPTIONS_INDEX.HSV_MEMBER_DISPLAY, 1)
             Ret = HypZoomIn(.Name, .Range("A" & LastRow), 1, False)
@@ -56,10 +59,9 @@ Public Sub RefreshSmartViewTree()
 End Sub
 
 '==========================================================
-' CREATE HIERARCHY ARRAYS
-' Creates arrays from row 3 to last row
+' CREATE SIMPLE ARRAYS - FROM ROW 3
 '==========================================================
-Public Sub CreateHierarchyArrays()
+Public Sub CreateSimpleArrays()
     Dim wsLists As Worksheet
     Dim arrSheets As Variant
     Dim i As Long
@@ -87,11 +89,12 @@ Public Sub CreateHierarchyArrays()
         If rng Is Nothing Then GoTo NextArray
         On Error GoTo 0
         
-        ' Process only if range has at least 3 rows
+        ' Only if range has enough rows
         If rng.Rows.Count >= 3 Then
             ' Create array from row 3 to last row
-            Set dataArray = rng.Worksheet.Range(rng.Cells(3, 1), rng.Cells(rng.Rows.Count, 1)).Value
+            dataArray = rng.Worksheet.Range(rng.Cells(3, 1), rng.Cells(rng.Rows.Count, 1)).Value
             arrCount = arrCount + 1
+            ' The array is now in dataArray for this hierarchy
         End If
         
 NextArray:
