@@ -1,41 +1,83 @@
 let
-    // Step 1: Import XRP File (replace with your actual file path)
-    Source = Excel.Workbook(File.Contents("C:\Path\To\Your\XRPFile.xlsx"), null, true),
+    // Step 1: Import XRP Tree File
+    SourceTree = Excel.Workbook(File.Contents("C:\Path\To\Your\XRPTreeFile.xlsx"), null, true),
+    XRPTreeSheet = SourceTree{[Item="Sheet1",Kind="Sheet"]}[Data],
+    XRPTreeHeaders = Table.PromoteHeaders(Table.Skip(XRPTreeSheet, 4), [PromoteAllScalars=true]),
     
-    // Step 2: Extract data from the first sheet starting at row 5 for headers
-    XRPSheet = Source{[Item="Sheet1",Kind="Sheet"]}[Data],
-    XRPHeaders = Table.PromoteHeaders(Table.Skip(XRPSheet, 4), [PromoteAllScalars=true]),
+    // Step 2: Import XRP List File
+    SourceList = Excel.Workbook(File.Contents("C:\Path\To\Your\XRPListFile.xlsx"), null, true),
+    XRPListSheet = SourceList{[Item="Sheet1",Kind="Sheet"]}[Data],
+    XRPListHeaders = Table.PromoteHeaders(Table.Skip(XRPListSheet, 4), [PromoteAllScalars=true]),
     
-    // Step 3: Select and rename relevant columns
-    XRPCleanedTable = Table.SelectColumns(XRPHeaders, {"Tree Name", "Value", "Parent"}),
-    XRPRenamedTable = Table.RenameColumns(XRPCleanedTable, {
+    // Step 3: Select and rename relevant columns for Tree data
+    XRPTreeCleanedTable = Table.SelectColumns(XRPTreeHeaders, {"Tree Name", "Value", "Parent"}),
+    XRPTreeRenamedTable = Table.RenameColumns(XRPTreeCleanedTable, {
         {"Tree Name", "Hierarchy"}, 
         {"Value", "XRP_Value"}, 
         {"Parent", "XRP_Parent"}
     }),
     
-    // Step 4: Create Cheia column (concatenated key) for XRP data
-    XRPWithCheia = Table.AddColumn(XRPRenamedTable, "XRP_Cheia", each [Hierarchy] & " | " & [XRP_Value] & " | " & [XRP_Parent], type text),
+    // Step 4: Add Type column to Tree data
+    XRPTreeWithType = Table.AddColumn(XRPTreeRenamedTable, "Type", each "XRP tree", type text),
     
-    // Step 5: Reference the Smart View query table (adjust the name if needed)
+    // Step 5: Select and rename relevant columns for List data
+    XRPListCleanedTable = Table.SelectColumns(XRPListHeaders, {"Tree Name", "Value", "Parent"}),
+    XRPListRenamedTable = Table.RenameColumns(XRPListCleanedTable, {
+        {"Tree Name", "Hierarchy"}, 
+        {"Value", "XRP_Value"}, 
+        {"Parent", "XRP_Parent"}
+    }),
+    
+    // Step 6: Add Type column to List data
+    XRPListWithType = Table.AddColumn(XRPListRenamedTable, "Type", each "XRP list", type text),
+    
+    // Step 7: Combine both XRP data sources
+    CombinedXRP = Table.Combine({XRPTreeWithType, XRPListWithType}),
+    
+    // Step 8: Create Cheia column for combined XRP data
+    XRPWithCheia = Table.AddColumn(CombinedXRP, "XRP_Cheia", each [Hierarchy] & " | " & [XRP_Value] & " | " & [XRP_Parent], type text),
+    
+    // Step 9: Reference the Smart View query table and Hierarchy Matrix
     SmartViewTable = Excel.CurrentWorkbook(){[Name="SmartView_FlatTable"]}[Content],
+    HierarchyMatrix = Excel.CurrentWorkbook(){[Name="Hierarchy_Matrix"]}[Content],
     
-    // Step 6: Ensure consistent column names in Smart View data
+    // Step 10: Add Type information from Hierarchy Matrix
+    MatrixWithType = Table.SelectColumns(HierarchyMatrix, {"Hierarchy", "Type"}),
+    
+    // Step 11: Ensure consistent column names in Smart View data
     SmartViewRenamedTable = Table.RenameColumns(SmartViewTable, {
         {"Value", "SV_Value"}, 
         {"Parent", "SV_Parent"}
     }),
     
-    // Step 7: Create Cheia column for Smart View data
-    SVWithCheia = Table.AddColumn(SmartViewRenamedTable, "SV_Cheia", each [Hierarchy] & " | " & [SV_Value] & " | " & [SV_Parent], type text),
+    // Step 12: Join Type information to Smart View data
+    SmartViewWithType = Table.NestedJoin(
+        SmartViewRenamedTable, 
+        {"Hierarchy"}, 
+        MatrixWithType, 
+        {"Hierarchy"}, 
+        "TypeInfo", 
+        JoinKind.LeftOuter
+    ),
+    SmartViewExpandedType = Table.ExpandTableColumn(
+        SmartViewWithType, 
+        "TypeInfo", 
+        {"Type"}, 
+        {"Type"}
+    ),
     
-    // Step 8: Perform a full outer join between the tables
-    // First, do a left outer join from Smart View to XRP
+    // Step 13: Create Cheia column for Smart View data
+    SVWithCheia = Table.AddColumn(SmartViewExpandedType, "SV_Cheia", each [Hierarchy] & " | " & [SV_Value] & " | " & [SV_Parent], type text),
+    
+    // Step 14: Filter Smart View data for relevant types
+    FilteredSV = Table.SelectRows(SVWithCheia, each [Type] = "XRP tree" or [Type] = "XRP list"),
+    
+    // Step 15: Perform a left outer join from Smart View to XRP
     LeftJoin = Table.NestedJoin(
-        SVWithCheia, 
-        {"Hierarchy", "SV_Value"}, 
+        FilteredSV, 
+        {"Hierarchy", "Type", "SV_Value"}, 
         XRPWithCheia, 
-        {"Hierarchy", "XRP_Value"}, 
+        {"Hierarchy", "Type", "XRP_Value"}, 
         "XRPMatches", 
         JoinKind.LeftOuter
     ),
@@ -46,12 +88,12 @@ let
         {"XRP_Parent", "XRP_Cheia"}
     ),
     
-    // Step 9: Find items in XRP not in Smart View (right anti-join)
+    // Step 16: Find items in XRP not in Smart View (right anti-join)
     RightAntiJoin = Table.NestedJoin(
         XRPWithCheia, 
-        {"Hierarchy", "XRP_Value"}, 
-        SVWithCheia, 
-        {"Hierarchy", "SV_Value"}, 
+        {"Hierarchy", "Type", "XRP_Value"}, 
+        FilteredSV, 
+        {"Hierarchy", "Type", "SV_Value"}, 
         "SVMatches", 
         JoinKind.LeftAnti
     ),
@@ -62,22 +104,22 @@ let
         {}
     ),
     
-    // Step 10: Add empty columns for Smart View data in right anti-join
+    // Step 17: Add empty columns for Smart View data in right anti-join
     RightAntiJoinWithColumns = Table.AddColumn(ExpandedRightAntiJoin, "SV_Value", each null, type text),
     RightAntiJoinWithMoreColumns = Table.AddColumn(RightAntiJoinWithColumns, "SV_Parent", each null, type text),
     RightAntiJoinComplete = Table.AddColumn(RightAntiJoinWithMoreColumns, "SV_Cheia", each null, type text),
     
-    // Step 11: Rename columns in right anti-join to match left join
+    // Step 18: Rename columns in right anti-join to match left join
     RightAntiJoinRenamed = Table.RenameColumns(RightAntiJoinComplete, {
         {"XRP_Value", "SV_Value"}, 
         {"XRP_Parent", "XRP_Parent"}, 
         {"XRP_Cheia", "XRP_Cheia"}
     }),
     
-    // Step 12: Combine both results
+    // Step 19: Combine both results
     CombinedResults = Table.Combine({ExpandedLeftJoin, RightAntiJoinRenamed}),
     
-    // Step 13: Add Status column
+    // Step 20: Add Status column
     WithStatus = Table.AddColumn(CombinedResults, "Status", each 
         if [SV_Value] = null then "Missing in Smart View"
         else if [XRP_Parent] = null then "Missing in XRP"
@@ -85,14 +127,34 @@ let
         else "Match"
     ),
     
-    // Step 14: Reorder and select final columns
-    ReorderedColumns = Table.ReorderColumns(WithStatus, {
-        "Hierarchy", "SV_Value", "SV_Parent", "XRP_Parent", "Status"
+    // Step 21: Add Dimension column from Hierarchy Matrix
+    HierarchyWithDimension = Table.SelectColumns(HierarchyMatrix, {"Hierarchy", "Type", "Dimension"}),
+    
+    // Step 22: Join Dimension information
+    WithDimension = Table.NestedJoin(
+        WithStatus, 
+        {"Hierarchy", "Type"}, 
+        HierarchyWithDimension, 
+        {"Hierarchy", "Type"}, 
+        "DimensionInfo", 
+        JoinKind.LeftOuter
+    ),
+    ExpandedWithDimension = Table.ExpandTableColumn(
+        WithDimension, 
+        "DimensionInfo", 
+        {"Dimension"}, 
+        {"Dimension"}
+    ),
+    
+    // Step 23: Reorder and select final columns
+    ReorderedColumns = Table.ReorderColumns(ExpandedWithDimension, {
+        "Hierarchy", "Type", "Dimension", "SV_Value", "SV_Parent", "XRP_Parent", "Status", "SV_Cheia", "XRP_Cheia"
     }),
     
-    // Step 15: Sort by Hierarchy and Status
+    // Step 24: Sort by Hierarchy, Type, and Status
     SortedTable = Table.Sort(ReorderedColumns, {
         {"Hierarchy", Order.Ascending}, 
+        {"Type", Order.Ascending},
         {"Status", Order.Ascending}
     })
 in
