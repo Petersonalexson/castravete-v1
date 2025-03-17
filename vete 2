@@ -1,202 +1,252 @@
-let
-    // Step 1: Reference the existing SmartViewData query
-    SmartViewData = SmartViewData,
+Public Function CreateXRPArrays() As Boolean
+    ' Function to ensure XRP Arrays exist
+    ' Returns True if successful, False if error occurs
     
-    // Step 2: Extract necessary columns from SmartViewData
-    SVCleaned = Table.SelectColumns(SmartViewData, {"Hierarchy Name", "Type", "V_S_C", "Value", "Parent", "KEY"}),
+    On Error GoTo ErrorHandler
     
-    // Step 3: Reference Hierarchy Matrix with the new structure
-    HierarchyMatrix = Excel.CurrentWorkbook(){[Name="Hierarchy_Matrix"]}[Content],
+    Dim wsXRPArrays As Worksheet
+    Dim treeArrayExists As Boolean
+    Dim listArrayExists As Boolean
     
-    // Step 4: Ensure column names are correct in hierarchy matrix
-    MatrixRenamed = Table.RenameColumns(HierarchyMatrix, {
-        {"Column1", "Sheet Name"}, 
-        {"Column2", "Range Name"}, 
-        {"Column3", "V_S_C"},
-        {"Column4", "Hierarchy Name"},
-        {"Column5", "Type"}
-    }),
+    ' Check if arrays worksheet exists
+    On Error Resume Next
+    Set wsXRPArrays = ThisWorkbook.Worksheets("XRP_Arrays")
+    On Error GoTo ErrorHandler
     
-    // Step 5: Import XRP Tree File - has Tree_Name and V_S_C
-    SourceTree = Excel.Workbook(File.Contents("C:\Path\To\Your\XRPTreeFile.xlsx"), null, true),
-    XRPTreeSheet = SourceTree{[Item="Sheet1",Kind="Sheet"]}[Data],
-    XRPTreeHeaders = Table.PromoteHeaders(Table.Skip(XRPTreeSheet, 4), [PromoteAllScalars=true]),
+    ' If worksheet doesn't exist, create it
+    If wsXRPArrays Is Nothing Then
+        Set wsXRPArrays = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        wsXRPArrays.Name = "XRP_Arrays"
+    End If
     
-    // Step 6: Import XRP List File - has only V_S_C, no Tree_Name
-    SourceList = Excel.Workbook(File.Contents("C:\Path\To\Your\XRPListFile.xlsx"), null, true),
-    XRPListSheet = SourceList{[Item="Sheet1",Kind="Sheet"]}[Data],
-    XRPListHeaders = Table.PromoteHeaders(Table.Skip(XRPListSheet, 4), [PromoteAllScalars=true]),
+    ' Check if named ranges exist
+    On Error Resume Next
+    treeArrayExists = Not (ThisWorkbook.Names("XRP_Tree_Array") Is Nothing)
+    listArrayExists = Not (ThisWorkbook.Names("XRP_List_Array") Is Nothing)
+    On Error GoTo ErrorHandler
     
-    // Step 7: Clean and rename XRP Tree data with the Tree_Name column
-    XRPTreeCleaned = Table.SelectColumns(XRPTreeHeaders, {"Tree_Name", "Value", "Parent", "V_S_C"}),
-    XRPTreeRenamed = Table.RenameColumns(XRPTreeCleaned, {
-        {"Tree_Name", "Hierarchy Name"},
-        {"Value", "XRP_Value"},
-        {"Parent", "XRP_Parent"},
-        {"V_S_C", "V_S_C"}
-    }),
+    ' If either array doesn't exist, create default arrays
+    If Not (treeArrayExists And listArrayExists) Then
+        ' Clear worksheet
+        wsXRPArrays.Cells.Clear
+        
+        ' Create Tree array if needed
+        If Not treeArrayExists Then
+            ' Set up headers
+            With wsXRPArrays
+                .Range("A1").Value = "XRP Tree Data"
+                .Range("A1").Font.Bold = True
+                .Range("A1").Font.Size = 14
+                
+                .Range("A3").Value = "Tree_Name"
+                .Range("B3").Value = "Value"
+                .Range("C3").Value = "Parent"
+                .Range("D3").Value = "V_S_C"
+                .Range("A3:D3").Font.Bold = True
+                .Range("A3:D3").Interior.Color = RGB(200, 200, 200)
+                
+                ' Create a single dummy row for structure
+                .Range("A4").Value = "Sample_Tree"
+                .Range("B4").Value = "Sample_Value"
+                .Range("C4").Value = "Sample_Parent"
+                .Range("D4").Value = "Sample_V_S_C"
+                
+                ' Create named range
+                On Error Resume Next
+                ThisWorkbook.Names("XRP_Tree_Array").Delete
+                On Error GoTo ErrorHandler
+                ThisWorkbook.Names.Add Name:="XRP_Tree_Array", RefersTo:=.Range("A3:D4")
+            End With
+        End If
+        
+        ' Create List array if needed
+        If Not listArrayExists Then
+            ' Set up headers
+            With wsXRPArrays
+                .Range("F1").Value = "XRP List Data"
+                .Range("F1").Font.Bold = True
+                .Range("F1").Font.Size = 14
+                
+                .Range("F3").Value = "Value"
+                .Range("G3").Value = "V_S_C"
+                .Range("F3:G3").Font.Bold = True
+                .Range("F3:G3").Interior.Color = RGB(200, 200, 200)
+                
+                ' Create a single dummy row for structure
+                .Range("F4").Value = "Sample_Value"
+                .Range("G4").Value = "Sample_V_S_C"
+                
+                ' Create named range
+                On Error Resume Next
+                ThisWorkbook.Names("XRP_List_Array").Delete
+                On Error GoTo ErrorHandler
+                ThisWorkbook.Names.Add Name:="XRP_List_Array", RefersTo:=.Range("F3:G4")
+            End With
+        End If
+        
+        ' Format and autofit
+        wsXRPArrays.Columns("A:G").AutoFit
+    End If
     
-    // Step 8: Add Type column to XRP Tree data
-    XRPTreeWithType = Table.AddColumn(XRPTreeRenamed, "Type", each "Tree", type text),
+    ' Success
+    CreateXRPArrays = True
+    Exit Function
     
-    // Step 9: Clean and rename XRP List data - no Tree_Name or Parent column
-    XRPListCleaned = Table.SelectColumns(XRPListHeaders, {"Value", "V_S_C"}),
+ErrorHandler:
+    MsgBox "Error creating XRP arrays: " & Err.Description, vbExclamation, "Array Creation Error"
+    CreateXRPArrays = False
+End Function
+
+Public Sub PopulateXRPArrays()
+    ' Main sub to populate XRP arrays with real data
     
-    // Step 10: For List data, add a Hierarchy Name column derived from V_S_C
-    // since there's no Tree_Name column in List data
-    XRPListWithHierarchy = Table.AddColumn(XRPListCleaned, "Hierarchy Name", each [V_S_C], type text),
+    ' First ensure arrays exist
+    If Not CreateXRPArrays() Then
+        MsgBox "Could not create the necessary XRP array structures.", vbExclamation
+        Exit Sub
+    End If
     
-    // Step 11: Rename other columns for consistency
-    XRPListRenamed = Table.RenameColumns(XRPListWithHierarchy, {
-        {"Value", "XRP_Value"}
-    }),
+    ' Get path for XRP Tree file
+    Dim xrpTreePath As String
+    xrpTreePath = InputBox("Enter the full path to the XRP Tree file:", "XRP Tree File", "C:\Path\To\Your\XRPTreeFile.xlsx")
     
-    // Step 12: Add empty Parent column to XRP List data
-    XRPListWithParent = Table.AddColumn(XRPListRenamed, "XRP_Parent", each "", type text),
+    If xrpTreePath = "" Then
+        MsgBox "No path provided for XRP Tree file. Using sample data only.", vbInformation
+    Else
+        ' Import XRP Tree data
+        ImportXRPTreeData xrpTreePath
+    End If
     
-    // Step 13: Add Type column to XRP List data
-    XRPListWithType = Table.AddColumn(XRPListWithParent, "Type", each "List", type text),
+    ' Get path for XRP List file
+    Dim xrpListPath As String
+    xrpListPath = InputBox("Enter the full path to the XRP List file:", "XRP List File", "C:\Path\To\Your\XRPListFile.xlsx")
     
-    // Step 14: Combine both XRP data sources
-    CombinedXRP = Table.Combine({XRPTreeWithType, XRPListWithType}),
+    If xrpListPath = "" Then
+        MsgBox "No path provided for XRP List file. Using sample data only.", vbInformation
+    Else
+        ' Import XRP List data
+        ImportXRPListData xrpListPath
+    End If
     
-    // Step 15: Create KEY column for XRP data
-    XRPWithKey = Table.AddColumn(CombinedXRP, "KEY", each 
-        if [Type] = "Tree" then [Hierarchy Name] & " | " & [XRP_Value]
-        else [V_S_C] & " | " & [XRP_Value],
-        type text
-    ),
+    MsgBox "XRP arrays have been populated and are ready for use.", vbInformation
+End Sub
+
+Private Sub ImportXRPTreeData(xrpTreePath As String)
+    ' Import data from XRP Tree file into the array
+    On Error Resume Next
+    Dim xrpTreeWorkbook As Workbook
+    Dim treeSheet As Worksheet
+    Dim wsXRPArrays As Worksheet
+    Dim treeLastRow As Long
+    Dim i As Long
     
-    // Step 16: Filter SmartViewData based on hierarchies in the Matrix
-    SVWithHierarchies = Table.NestedJoin(
-        SVCleaned,
-        {"V_S_C", "Type"},  // Join on V_S_C and Type
-        MatrixRenamed,
-        {"V_S_C", "Type"},  // Join on V_S_C and Type
-        "HierarchyMatches",
-        JoinKind.Inner
-    ),
-    SVFiltered = Table.RemoveColumns(SVWithHierarchies, {"HierarchyMatches"}),
+    ' Open XRP Tree file
+    Set xrpTreeWorkbook = Workbooks.Open(xrpTreePath, ReadOnly:=True)
+    If Err.Number <> 0 Then
+        MsgBox "Could not open XRP Tree file: " & xrpTreePath & vbCrLf & Err.Description, vbExclamation
+        Exit Sub
+    End If
     
-    // Step 17: Rename columns in SmartViewData for clarity
-    SVRenamed = Table.RenameColumns(SVFiltered, {
-        {"Value", "SV_Value"},
-        {"Parent", "SV_Parent"}
-    }),
+    ' Get first sheet
+    Set treeSheet = xrpTreeWorkbook.Sheets(1)
+    Set wsXRPArrays = ThisWorkbook.Worksheets("XRP_Arrays")
     
-    // Step 18: Perform join between SmartView and XRP data
-    // For Tree type: match on Hierarchy Name, Type, and V_S_C
-    // For List type: match on V_S_C and Type only
+    ' Clear existing data (except headers)
+    wsXRPArrays.Range("A4:D" & wsXRPArrays.Rows.Count).ClearContents
     
-    // First, filter SmartView data by Type for separate handling
-    SVTree = Table.SelectRows(SVRenamed, each [Type] = "Tree"),
-    SVList = Table.SelectRows(SVRenamed, each [Type] = "List"),
+    ' Find data range
+    treeLastRow = treeSheet.Cells(treeSheet.Rows.Count, "A").End(xlUp).Row
     
-    // XRP data filtered by Type
-    XRPTree = Table.SelectRows(XRPWithKey, each [Type] = "Tree"),
-    XRPList = Table.SelectRows(XRPWithKey, each [Type] = "List"),
+    ' Check if there's data to process
+    If treeLastRow < 6 Then
+        MsgBox "No data found in the XRP Tree file (beyond row 5).", vbExclamation
+        xrpTreeWorkbook.Close SaveChanges:=False
+        Exit Sub
+    End If
     
-    // Join Tree data
-    SVTreeToXRPJoin = Table.NestedJoin(
-        SVTree,
-        {"Hierarchy Name", "V_S_C", "KEY"},
-        XRPTree,
-        {"Hierarchy Name", "V_S_C", "KEY"},
-        "XRPMatches",
-        JoinKind.LeftOuter
-    ),
-    ExpandedSVTreeToXRP = Table.ExpandTableColumn(
-        SVTreeToXRPJoin,
-        "XRPMatches",
-        {"XRP_Parent"},
-        {"XRP_Parent"}
-    ),
+    ' Copy data to array sheet
+    Dim targetRow As Long
+    targetRow = 4 ' Start after headers
     
-    // Join List data
-    SVListToXRPJoin = Table.NestedJoin(
-        SVList,
-        {"V_S_C", "KEY"},
-        XRPList,
-        {"V_S_C", "KEY"},
-        "XRPMatches",
-        JoinKind.LeftOuter
-    ),
-    ExpandedSVListToXRP = Table.ExpandTableColumn(
-        SVListToXRPJoin,
-        "XRPMatches",
-        {"XRP_Parent"},
-        {"XRP_Parent"}
-    ),
+    For i = 6 To treeLastRow
+        wsXRPArrays.Cells(targetRow, 1).Value = treeSheet.Cells(i, 1).Value ' Tree_Name (A)
+        wsXRPArrays.Cells(targetRow, 2).Value = treeSheet.Cells(i, 2).Value ' Value (B)
+        wsXRPArrays.Cells(targetRow, 3).Value = treeSheet.Cells(i, 3).Value ' Parent (C)
+        wsXRPArrays.Cells(targetRow, 4).Value = treeSheet.Cells(i, 8).Value ' V_S_C (H)
+        targetRow = targetRow + 1
+    Next i
     
-    // Combine the results from Tree and List joins
-    CombinedSVToXRP = Table.Combine({ExpandedSVTreeToXRP, ExpandedSVListToXRP}),
+    ' Update named range
+    Dim finalRow As Long
+    finalRow = wsXRPArrays.Cells(wsXRPArrays.Rows.Count, "A").End(xlUp).Row
     
-    // Step 19: Find items in XRP not in SmartView
-    // For Tree data
-    XRPTreeToSVJoin = Table.NestedJoin(
-        XRPTree,
-        {"Hierarchy Name", "V_S_C", "KEY"},
-        SVTree,
-        {"Hierarchy Name", "V_S_C", "KEY"},
-        "SVMatches",
-        JoinKind.LeftAnti
-    ),
+    ' Delete and recreate named range
+    On Error Resume Next
+    ThisWorkbook.Names("XRP_Tree_Array").Delete
+    On Error GoTo 0
     
-    // For List data
-    XRPListToSVJoin = Table.NestedJoin(
-        XRPList,
-        {"V_S_C", "KEY"},
-        SVList,
-        {"V_S_C", "KEY"},
-        "SVMatches",
-        JoinKind.LeftAnti
-    ),
+    ' Create named range with actual data
+    ThisWorkbook.Names.Add Name:="XRP_Tree_Array", RefersTo:=wsXRPArrays.Range("A3:D" & finalRow)
     
-    // Combine XRP items not in SmartView
-    CombinedXRPToSV = Table.Combine({XRPTreeToSVJoin, XRPListToSVJoin}),
+    ' Close workbook
+    xrpTreeWorkbook.Close SaveChanges:=False
+End Sub
+
+Private Sub ImportXRPListData(xrpListPath As String)
+    ' Import data from XRP List file into the array
+    On Error Resume Next
+    Dim xrpListWorkbook As Workbook
+    Dim listSheet As Worksheet
+    Dim wsXRPArrays As Worksheet
+    Dim listLastRow As Long
+    Dim i As Long
     
-    // Step 20: Add empty columns for SmartView data in the anti-join results
-    XRPOnlyWithColumns = Table.AddColumn(CombinedXRPToSV, "SV_Value", each null, type text),
-    XRPOnlyWithMoreColumns = Table.AddColumn(XRPOnlyWithColumns, "SV_Parent", each null, type text),
+    ' Open XRP List file
+    Set xrpListWorkbook = Workbooks.Open(xrpListPath, ReadOnly:=True)
+    If Err.Number <> 0 Then
+        MsgBox "Could not open XRP List file: " & xrpListPath & vbCrLf & Err.Description, vbExclamation
+        Exit Sub
+    End If
     
-    // Step 21: Select and reorder columns for XRP-only data to match main table
-    XRPOnlyReordered = Table.SelectColumns(XRPOnlyWithMoreColumns, {
-        "Hierarchy Name", "Type", "V_S_C", "SV_Value", "SV_Parent", "XRP_Value", "XRP_Parent", "KEY"
-    }),
+    ' Get first sheet
+    Set listSheet = xrpListWorkbook.Sheets(1)
+    Set wsXRPArrays = ThisWorkbook.Worksheets("XRP_Arrays")
     
-    // Step 22: Rename columns for proper display in combined result
-    XRPOnlyRenamed = Table.RenameColumns(XRPOnlyReordered, {{"XRP_Value", "Value"}}),
+    ' Clear existing data (except headers)
+    wsXRPArrays.Range("F4:G" & wsXRPArrays.Rows.Count).ClearContents
     
-    // Step 23: Combine both results
-    AllResults = Table.Combine({CombinedSVToXRP, XRPOnlyRenamed}),
+    ' Find data range (using column B as it should always have data)
+    listLastRow = listSheet.Cells(listSheet.Rows.Count, "B").End(xlUp).Row
     
-    // Step 24: Add Status column based on comparison
-    WithStatus = Table.AddColumn(AllResults, "Status", each
-        if [SV_Value] = null then "Missing in SmartView"
-        else if [XRP_Parent] = null and [Type] = "Tree" then "Missing in XRP"
-        else if [Type] = "Tree" and [SV_Parent] <> [XRP_Parent] then "Different Parent"
-        else if [Type] = "List" and [XRP_Parent] = null then "Missing in XRP"
-        else "Match",
-        type text
-    ),
+    ' Check if there's data to process
+    If listLastRow < 6 Then
+        MsgBox "No data found in the XRP List file (beyond row 5).", vbExclamation
+        xrpListWorkbook.Close SaveChanges:=False
+        Exit Sub
+    End If
     
-    // Step 25: Extract the actual Value from the KEY for display purposes
-    WithValueExtracted = Table.AddColumn(WithStatus, "Value", each
-        if [SV_Value] <> null then [SV_Value] else Text.AfterDelimiter([KEY], " | ", 1),
-        type text
-    ),
+    ' Copy data to array sheet
+    Dim targetRow As Long
+    targetRow = 4 ' Start after headers
     
-    // Step 26: Reorder and select final columns for output
-    FinalColumns = Table.SelectColumns(WithValueExtracted, {
-        "Hierarchy Name", "Type", "V_S_C", "Value", "SV_Parent", "XRP_Parent", "Status"
-    }),
+    For i = 6 To listLastRow
+        wsXRPArrays.Cells(targetRow, 6).Value = listSheet.Cells(i, 2).Value ' Value (B)
+        wsXRPArrays.Cells(targetRow, 7).Value = listSheet.Cells(i, 8).Value ' V_S_C (H)
+        targetRow = targetRow + 1
+    Next i
     
-    // Step 27: Sort results by hierarchy, type, V_S_C, and status
-    SortedResults = Table.Sort(FinalColumns, {
-        {"Type", Order.Ascending},
-        {"V_S_C", Order.Ascending},
-        {"Hierarchy Name", Order.Ascending},
-        {"Status", Order.Ascending}
-    })
-in
-    SortedResults
+    ' Update named range
+    Dim finalRow As Long
+    finalRow = wsXRPArrays.Cells(wsXRPArrays.Rows.Count, "F").End(xlUp).Row
+    
+    ' Delete and recreate named range
+    On Error Resume Next
+    ThisWorkbook.Names("XRP_List_Array").Delete
+    On Error GoTo 0
+    
+    ' Create named range with actual data
+    ThisWorkbook.Names.Add Name:="XRP_List_Array", RefersTo:=wsXRPArrays.Range("F3:G" & finalRow)
+    
+    ' Close workbook
+    xrpListWorkbook.Close SaveChanges:=False
+End Sub
