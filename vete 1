@@ -1,104 +1,289 @@
 Option Explicit
 
-'==========================================================
-' MAIN: Refresh SmartView and create arrays
-'==========================================================
-Public Sub ZoomInAndCreateArrays()
-    RefreshSmartView
-    CreateSimpleArrays
-End Sub
+Sub RefreshSmartViewTree()
 
-'==========================================================
-' REFRESH SMARTVIEW - ZOOM IN ONLY
-'==========================================================
-Public Sub RefreshSmartView()
+    On Error GoTo ErrorHandler
+    
+    ' Variable declarations
     Dim arrSheets As Variant
     Dim ws As Worksheet
-    Dim wsLists As Worksheet
+    Dim wsList As Worksheet
     Dim ConnectionName As String
-    Dim Ret As Long, HeaderRow As Long, LastRow As Long, I As Long
+    Dim Ret As Long, HeaderRow As Long, LastRow As Long, i As Long
     Dim ConnStatus As Integer
+    Dim startTime As Double
+    Dim hierarchyArray As Variant
+    Dim rangeName As String
+    Dim logSheet As Worksheet
+    Dim logRow As Long
     
-    Set wsLists = ThisWorkbook.Worksheets("Lists")
+    ' Start performance timer
+    startTime = Timer
     
-    With wsLists
+    ' Verify and create log sheet
+    On Error Resume Next
+    Set logSheet = ThisWorkbook.Sheets("ProcessLog")
+    On Error GoTo ErrorHandler
+    
+    If logSheet Is Nothing Then
+        Set logSheet = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        logSheet.Name = "ProcessLog"
+        With logSheet
+            .Range("A1") = "Timestamp"
+            .Range("B1") = "Sheet"
+            .Range("C1") = "Range Name"
+            .Range("D1") = "Action"
+            .Range("E1") = "Status"
+            .Range("F1") = "Details"
+            .Range("A1:F1").Font.Bold = True
+        End With
+    End If
+    
+    logRow = logSheet.Cells(logSheet.Rows.Count, "A").End(xlUp).Row + 1
+    
+    ' Verify wsLists exists
+    On Error Resume Next
+    Set wsList = ThisWorkbook.Sheets("Lists")
+    On Error GoTo ErrorHandler
+    
+    If wsList Is Nothing Then
+        MsgBox "Required 'Lists' worksheet not found!", vbCritical, "Error"
+        GoTo CleanExit
+    End If
+    
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.Calculation = xlCalculationManual
+    
+    ' Get configuration data
+    With wsList
+        On Error Resume Next
         ConnectionName = .Range("nmConnectionName").Value
+        If Err.Number <> 0 Then
+            MsgBox "Named range 'nmConnectionName' not found!", vbCritical, "Error"
+            GoTo CleanExit
+        End If
+        
+        On Error Resume Next
         arrSheets = .Range("Hierarchy_Matrix").Value
+        If Err.Number <> 0 Then
+            MsgBox "Named range 'Hierarchy_Matrix' not found!", vbCritical, "Error"
+            GoTo CleanExit
+        End If
+        On Error GoTo ErrorHandler
     End With
     
-    HeaderRow = 4
+    If ConnectionName = "" Then
+        MsgBox "Connection name is empty!", vbCritical, "Error"
+        GoTo CleanExit
+    End If
     
-    For I = LBound(arrSheets) To UBound(arrSheets)
-        Set ws = ThisWorkbook.Worksheets(arrSheets(I, 1))
+    ' Log process start
+    With logSheet
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "ALL"
+        .Cells(logRow, 3) = "N/A"
+        .Cells(logRow, 4) = "Process Started"
+        .Cells(logRow, 5) = "INFO"
+        .Cells(logRow, 6) = "Connection: " & ConnectionName
+    End With
+    logRow = logRow + 1
+    
+    HeaderRow = 3 ' Changed from 4 to 3 as requested
+    
+    ' Process each sheet in the matrix
+    For i = LBound(arrSheets) To UBound(arrSheets)
+        On Error Resume Next
+        Set ws = ThisWorkbook.Worksheets(arrSheets(i, 1))
+        If ws Is Nothing Then
+            With logSheet
+                .Cells(logRow, 1) = Now
+                .Cells(logRow, 2) = arrSheets(i, 1)
+                .Cells(logRow, 3) = "N/A"
+                .Cells(logRow, 4) = "Sheet Check"
+                .Cells(logRow, 5) = "ERROR"
+                .Cells(logRow, 6) = "Sheet not found"
+            End With
+            logRow = logRow + 1
+            GoTo NextSheet
+        End If
+        On Error GoTo ErrorHandler
+        
+        ' Validate range name
+        rangeName = Trim(arrSheets(i, 2))
+        If rangeName = "" Then
+            With logSheet
+                .Cells(logRow, 1) = Now
+                .Cells(logRow, 2) = ws.Name
+                .Cells(logRow, 3) = "EMPTY"
+                .Cells(logRow, 4) = "Range Name Check"
+                .Cells(logRow, 5) = "ERROR"
+                .Cells(logRow, 6) = "Range name is empty"
+            End With
+            logRow = logRow + 1
+            GoTo NextSheet
+        End If
+        
+        ' Remove any existing range with this name
+        On Error Resume Next
+        ThisWorkbook.Names(rangeName).Delete
+        On Error GoTo ErrorHandler
+        
         With ws
+            ' Connect to Smart View
             Ret = HypUIConnect(.Name, "", "", ConnectionName)
             ConnStatus = HypConnected(.Name)
-            If ConnStatus <> -1 Then Stop
             
-            'Calculate last row
+            If ConnStatus <> -1 Then
+                With logSheet
+                    .Cells(logRow, 1) = Now
+                    .Cells(logRow, 2) = ws.Name
+                    .Cells(logRow, 3) = rangeName
+                    .Cells(logRow, 4) = "HypUIConnect"
+                    .Cells(logRow, 5) = "ERROR"
+                    .Cells(logRow, 6) = "Connection failed. Status: " & ConnStatus
+                End With
+                logRow = logRow + 1
+                GoTo NextSheet
+            End If
+            
+            ' Calculate last row
             LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
             
-            'Delete hierarchy rows except hierarchy name
+            ' Log before deletion
+            With logSheet
+                .Cells(logRow, 1) = Now
+                .Cells(logRow, 2) = ws.Name
+                .Cells(logRow, 3) = rangeName
+                .Cells(logRow, 4) = "Before Delete"
+                .Cells(logRow, 5) = "INFO"
+                .Cells(logRow, 6) = "Last row: " & LastRow & ", Header row: " & HeaderRow
+            End With
+            logRow = logRow + 1
+            
+            ' Delete hierarchy rows except hierarchy name
             If LastRow > HeaderRow Then
                 .Rows(HeaderRow & ":" & LastRow - 1).Delete Shift:=xlUp
             End If
             
+            ' Recalculate last row after deletion
             LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
+            
+            ' Set display options and zoom in
             Ret = HypSetSheetOption(.Name, HYP_SVC_OPTIONS_INDEX.HSV_MEMBER_DISPLAY, 1)
+            
+            ' Zoom in on the hierarchy
             Ret = HypZoomIn(.Name, .Range("A" & LastRow), 1, False)
+            If Ret <> 0 Then
+                With logSheet
+                    .Cells(logRow, 1) = Now
+                    .Cells(logRow, 2) = ws.Name
+                    .Cells(logRow, 3) = rangeName
+                    .Cells(logRow, 4) = "HypZoomIn"
+                    .Cells(logRow, 5) = "ERROR"
+                    .Cells(logRow, 6) = "Zoom in failed. Return code: " & Ret
+                End With
+                logRow = logRow + 1
+                GoTo NextSheet
+            End If
+            
+            ' Get final row count after zoom in
             LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
             
-            ' Delete the named range if it exists
-            On Error Resume Next
-            ThisWorkbook.Names(arrSheets(I, 2)).Delete
-            On Error GoTo 0
-            
-            ThisWorkbook.Names.Add Name:=arrSheets(I, 2), RefersTo:=.Range("A" & HeaderRow & ":A" & LastRow)
+            ' Only create named range if we have data
+            If LastRow >= HeaderRow Then
+                ' Create named range
+                ThisWorkbook.Names.Add Name:=rangeName, RefersTo:=.Range("A" & HeaderRow & ":A" & LastRow)
+                
+                ' Capture the hierarchy array
+                hierarchyArray = .Range("A" & HeaderRow & ":A" & LastRow).Value
+                
+                ' Log success
+                With logSheet
+                    .Cells(logRow, 1) = Now
+                    .Cells(logRow, 2) = ws.Name
+                    .Cells(logRow, 3) = rangeName
+                    .Cells(logRow, 4) = "Processing Complete"
+                    .Cells(logRow, 5) = "SUCCESS"
+                    .Cells(logRow, 6) = "Items: " & (LastRow - HeaderRow + 1) & ", Range created"
+                End With
+            Else
+                ' Log empty hierarchy
+                With logSheet
+                    .Cells(logRow, 1) = Now
+                    .Cells(logRow, 2) = ws.Name
+                    .Cells(logRow, 3) = rangeName
+                    .Cells(logRow, 4) = "Processing Complete"
+                    .Cells(logRow, 5) = "WARNING"
+                    .Cells(logRow, 6) = "Empty hierarchy, no range created"
+                End With
+            End If
+            logRow = logRow + 1
         End With
-    Next I
-End Sub
-
-'==========================================================
-' CREATE SIMPLE ARRAYS - FROM ROW 3
-'==========================================================
-Public Sub CreateSimpleArrays()
-    Dim wsLists As Worksheet
-    Dim arrSheets As Variant
-    Dim i As Long
-    Dim rangeName As String
-    Dim hierarchyName As String
-    Dim arrCount As Long
-    
-    Set wsLists = ThisWorkbook.Worksheets("Lists")
-    arrSheets = wsLists.Range("Hierarchy_Matrix").Value
-    arrCount = 0
-    
-    For i = LBound(arrSheets) To UBound(arrSheets)
-        rangeName = Trim(arrSheets(i, 2))
-        hierarchyName = Trim(arrSheets(i, 3))
         
-        ' Skip if empty
-        If rangeName = "" Then GoTo NextArray
-        
-        ' Create array starting from row 3
-        Dim rng As Range
-        Dim dataArray As Variant
-        
-        On Error Resume Next
-        Set rng = ThisWorkbook.Names(rangeName).RefersToRange
-        If rng Is Nothing Then GoTo NextArray
-        On Error GoTo 0
-        
-        ' Only if range has enough rows
-        If rng.Rows.Count >= 3 Then
-            ' Create array from row 3 to last row
-            dataArray = rng.Worksheet.Range(rng.Cells(3, 1), rng.Cells(rng.Rows.Count, 1)).Value
-            arrCount = arrCount + 1
-            ' The array is now in dataArray for this hierarchy
-        End If
-        
-NextArray:
+NextSheet:
+        ' Move to next sheet
     Next i
     
-    MsgBox "Created " & arrCount & " arrays", vbInformation
+    ' Format log sheet
+    With logSheet
+        .Columns("A:F").AutoFit
+        .Range("A1:F" & logRow - 1).Sort Key1:=.Range("A1"), Order1:=xlDescending, Header:=xlYes
+        
+        ' Conditional formatting for status column
+        .Range("E2:E" & logRow - 1).FormatConditions.Delete
+        
+        ' Green for SUCCESS
+        .Range("E2:E" & logRow - 1).FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""SUCCESS"""
+        .Range("E2:E" & logRow - 1).FormatConditions(1).Interior.Color = RGB(198, 239, 206)
+        
+        ' Yellow for WARNING
+        .Range("E2:E" & logRow - 1).FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""WARNING"""
+        .Range("E2:E" & logRow - 1).FormatConditions(2).Interior.Color = RGB(255, 235, 156)
+        
+        ' Blue for INFO
+        .Range("E2:E" & logRow - 1).FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""INFO"""
+        .Range("E2:E" & logRow - 1).FormatConditions(3).Interior.Color = RGB(197, 217, 241)
+        
+        ' Red for ERROR
+        .Range("E2:E" & logRow - 1).FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""ERROR"""
+        .Range("E2:E" & logRow - 1).FormatConditions(4).Interior.Color = RGB(255, 199, 206)
+    End With
+    
+CleanExit:
+    ' Clean up
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Application.Calculation = xlCalculationAutomatic
+    
+    ' Log completion
+    With logSheet
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "ALL"
+        .Cells(logRow, 3) = "N/A"
+        .Cells(logRow, 4) = "Process Completed"
+        .Cells(logRow, 5) = "INFO"
+        .Cells(logRow, 6) = "Duration: " & Format(Timer - startTime, "0.00") & " seconds"
+    End With
+    
+    ' Activate log sheet
+    logSheet.Activate
+    Exit Sub
+    
+ErrorHandler:
+    ' Handle errors
+    With logSheet
+        .Cells(logRow, 1) = Now
+        If Not ws Is Nothing Then
+            .Cells(logRow, 2) = ws.Name
+        Else
+            .Cells(logRow, 2) = "UNKNOWN"
+        End If
+        .Cells(logRow, 3) = "N/A"
+        .Cells(logRow, 4) = "Error"
+        .Cells(logRow, 5) = "ERROR"
+        .Cells(logRow, 6) = "Error " & Err.Number & ": " & Err.Description
+    End With
+    logRow = logRow + 1
+    Resume CleanExit
 End Sub
