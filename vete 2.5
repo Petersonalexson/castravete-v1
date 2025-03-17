@@ -1,0 +1,315 @@
+Option Explicit
+
+'==========================================================
+' IMPORT DATA DIRECTLY AS ARRAYS FROM FIXED FILE PATHS
+' INCLUDES HEADERS WITH DATA IN THE SAME ARRAYS
+'==========================================================
+Public Sub ImportXRPDataAsArrays()
+    ' Fixed file paths - modify these to your actual file locations
+    Const XRP_TREE_PATH As String = "C:\Path\To\Your\XRPTreeFile.xlsx"
+    Const XRP_LIST_PATH As String = "C:\Path\To\Your\XRPListFile.xlsx"
+    
+    Dim wsProcessLog As Worksheet
+    Dim treeArrayName As String
+    Dim listArrayName As String
+    Dim logRow As Long
+    
+    ' Create or get ProcessLog2 sheet
+    On Error Resume Next
+    Set wsProcessLog = ThisWorkbook.Sheets("ProcessLog2")
+    If wsProcessLog Is Nothing Then
+        Set wsProcessLog = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        wsProcessLog.Name = "ProcessLog2"
+        With wsProcessLog
+            .Range("A1") = "Timestamp"
+            .Range("B1") = "Source"
+            .Range("C1") = "Array Name"
+            .Range("D1") = "Action"
+            .Range("E1") = "Status"
+            .Range("F1") = "Details"
+            .Range("A1:F1").Font.Bold = True
+        End With
+    End If
+    On Error GoTo 0
+    
+    ' Get array names from cells
+    On Error Resume Next
+    treeArrayName = ThisWorkbook.Sheets("Lists").Range("E3").Value
+    listArrayName = ThisWorkbook.Sheets("Lists").Range("E5").Value
+    
+    ' Use default names if not found
+    If treeArrayName = "" Then treeArrayName = "XRP_Tree_Array"
+    If listArrayName = "" Then listArrayName = "XRP_List_Array"
+    On Error GoTo 0
+    
+    ' Start logging
+    logRow = wsProcessLog.Cells(wsProcessLog.Rows.Count, "A").End(xlUp).Row + 1
+    With wsProcessLog
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "System"
+        .Cells(logRow, 3) = "N/A"
+        .Cells(logRow, 4) = "Process Started"
+        .Cells(logRow, 5) = "INFO"
+        .Cells(logRow, 6) = "Starting data import with headers included"
+    End With
+    logRow = logRow + 1
+    
+    ' Import Tree data
+    ImportTreeData XRP_TREE_PATH, treeArrayName, wsProcessLog, logRow
+    
+    ' Import List data
+    ImportListData XRP_LIST_PATH, listArrayName, wsProcessLog, logRow
+    
+    ' Final log entry
+    logRow = wsProcessLog.Cells(wsProcessLog.Rows.Count, "A").End(xlUp).Row + 1
+    With wsProcessLog
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "System"
+        .Cells(logRow, 3) = "N/A"
+        .Cells(logRow, 4) = "Process Completed"
+        .Cells(logRow, 5) = "INFO"
+        .Cells(logRow, 6) = "Import completed with headers included in arrays"
+    End With
+    
+    ' Format log
+    FormatProcessLog wsProcessLog
+    
+    ' Activate log
+    wsProcessLog.Activate
+    wsProcessLog.Range("A1").Select
+End Sub
+
+'==========================================================
+' IMPORT TREE DATA WITH HEADERS INCLUDED
+'==========================================================
+Private Sub ImportTreeData(treeFilePath As String, arrayName As String, logSheet As Worksheet, ByRef logRow As Long)
+    On Error GoTo ErrorHandler
+    
+    Dim treeWB As Workbook
+    Dim treeSheet As Worksheet
+    Dim lastRow As Long, lastCol As Long
+    Dim treeArray As Variant
+    Dim i As Long, j As Long
+    
+    ' Log start
+    With logSheet
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "XRP Tree"
+        .Cells(logRow, 3) = arrayName
+        .Cells(logRow, 4) = "Import Started"
+        .Cells(logRow, 5) = "INFO"
+        .Cells(logRow, 6) = "Opening file: " & treeFilePath
+    End With
+    logRow = logRow + 1
+    
+    ' Open workbook
+    Application.ScreenUpdating = False
+    Set treeWB = Workbooks.Open(treeFilePath, ReadOnly:=True)
+    Set treeSheet = treeWB.Sheets(1)
+    
+    ' Find data range - headers are in row 5
+    lastRow = treeSheet.Cells(treeSheet.Rows.Count, "A").End(xlUp).Row
+    lastCol = treeSheet.Cells(5, treeSheet.Columns.Count).End(xlToLeft).Column
+    
+    ' Check if we have data
+    If lastRow < 5 Then
+        With logSheet
+            .Cells(logRow, 1) = Now
+            .Cells(logRow, 2) = "XRP Tree"
+            .Cells(logRow, 3) = arrayName
+            .Cells(logRow, 4) = "No Data Found"
+            .Cells(logRow, 5) = "WARNING"
+            .Cells(logRow, 6) = "No data found including header row"
+        End With
+        logRow = logRow + 1
+        GoTo CloseTree
+    End If
+    
+    ' Create data array (including headers from row 5)
+    ReDim treeArray(1 To lastRow - 4, 1 To lastCol)
+    
+    ' Load array with data (from row 5 to last row, all columns)
+    For i = 5 To lastRow
+        For j = 1 To lastCol
+            treeArray(i - 4, j) = treeSheet.Cells(i, j).Value
+        Next j
+    Next i
+    
+    ' Create named item for the array
+    On Error Resume Next
+    ThisWorkbook.Names(arrayName).Delete
+    On Error GoTo ErrorHandler
+    
+    ' Create the array as a named item
+    ThisWorkbook.Names.Add Name:=arrayName, RefersToR1C1:=treeArray
+    
+    ' Log success
+    With logSheet
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "XRP Tree"
+        .Cells(logRow, 3) = arrayName
+        .Cells(logRow, 4) = "Import Completed"
+        .Cells(logRow, 5) = "SUCCESS"
+        .Cells(logRow, 6) = "Imported " & lastCol & " columns × " & (lastRow - 4) & " rows (including headers from row 5)"
+    End With
+    logRow = logRow + 1
+    
+CloseTree:
+    ' Close workbook
+    treeWB.Close SaveChanges:=False
+    Exit Sub
+    
+ErrorHandler:
+    ' Log error
+    With logSheet
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "XRP Tree"
+        .Cells(logRow, 3) = arrayName
+        .Cells(logRow, 4) = "Error"
+        .Cells(logRow, 5) = "ERROR"
+        .Cells(logRow, 6) = "Error " & Err.Number & ": " & Err.Description
+    End With
+    logRow = logRow + 1
+    
+    ' Close workbook if open
+    On Error Resume Next
+    If Not treeWB Is Nothing Then treeWB.Close SaveChanges:=False
+    On Error GoTo 0
+End Sub
+
+'==========================================================
+' IMPORT LIST DATA WITH HEADERS INCLUDED
+'==========================================================
+Private Sub ImportListData(listFilePath As String, arrayName As String, logSheet As Worksheet, ByRef logRow As Long)
+    On Error GoTo ErrorHandler
+    
+    Dim listWB As Workbook
+    Dim listSheet As Worksheet
+    Dim lastRow As Long, lastCol As Long
+    Dim listArray As Variant
+    Dim i As Long, j As Long
+    
+    ' Log start
+    With logSheet
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "XRP List"
+        .Cells(logRow, 3) = arrayName
+        .Cells(logRow, 4) = "Import Started"
+        .Cells(logRow, 5) = "INFO"
+        .Cells(logRow, 6) = "Opening file: " & listFilePath
+    End With
+    logRow = logRow + 1
+    
+    ' Open workbook
+    Application.ScreenUpdating = False
+    Set listWB = Workbooks.Open(listFilePath, ReadOnly:=True)
+    Set listSheet = listWB.Sheets(1)
+    
+    ' Find data range - headers are in row 4
+    lastRow = listSheet.Cells(listSheet.Rows.Count, "A").End(xlUp).Row
+    lastCol = listSheet.Cells(4, listSheet.Columns.Count).End(xlToLeft).Column
+    
+    ' Check if we have data
+    If lastRow < 4 Then
+        With logSheet
+            .Cells(logRow, 1) = Now
+            .Cells(logRow, 2) = "XRP List"
+            .Cells(logRow, 3) = arrayName
+            .Cells(logRow, 4) = "No Data Found"
+            .Cells(logRow, 5) = "WARNING"
+            .Cells(logRow, 6) = "No data found including header row"
+        End With
+        logRow = logRow + 1
+        GoTo CloseList
+    End If
+    
+    ' Create data array (including headers from row 4)
+    ReDim listArray(1 To lastRow - 3, 1 To lastCol)
+    
+    ' Load array with data (from row 4 to last row, all columns)
+    For i = 4 To lastRow
+        For j = 1 To lastCol
+            listArray(i - 3, j) = listSheet.Cells(i, j).Value
+        Next j
+    Next i
+    
+    ' Create named item for the array
+    On Error Resume Next
+    ThisWorkbook.Names(arrayName).Delete
+    On Error GoTo ErrorHandler
+    
+    ' Create the array as a named item
+    ThisWorkbook.Names.Add Name:=arrayName, RefersToR1C1:=listArray
+    
+    ' Log success
+    With logSheet
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "XRP List"
+        .Cells(logRow, 3) = arrayName
+        .Cells(logRow, 4) = "Import Completed"
+        .Cells(logRow, 5) = "SUCCESS"
+        .Cells(logRow, 6) = "Imported " & lastCol & " columns × " & (lastRow - 3) & " rows (including headers from row 4)"
+    End With
+    logRow = logRow + 1
+    
+CloseList:
+    ' Close workbook
+    listWB.Close SaveChanges:=False
+    Exit Sub
+    
+ErrorHandler:
+    ' Log error
+    With logSheet
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "XRP List"
+        .Cells(logRow, 3) = arrayName
+        .Cells(logRow, 4) = "Error"
+        .Cells(logRow, 5) = "ERROR"
+        .Cells(logRow, 6) = "Error " & Err.Number & ": " & Err.Description
+    End With
+    logRow = logRow + 1
+    
+    ' Close workbook if open
+    On Error Resume Next
+    If Not listWB Is Nothing Then listWB.Close SaveChanges:=False
+    On Error GoTo 0
+End Sub
+
+'==========================================================
+' FORMAT PROCESS LOG
+'==========================================================
+Private Sub FormatProcessLog(wsLog As Worksheet)
+    ' Format the process log with conditional formatting
+    
+    ' Get last row
+    Dim lastRow As Long
+    lastRow = wsLog.Cells(wsLog.Rows.Count, "A").End(xlUp).Row
+    
+    ' Format columns
+    wsLog.Columns("A:F").AutoFit
+    
+    ' Conditional formatting for status column
+    Dim statusRange As Range
+    Set statusRange = wsLog.Range("E2:E" & lastRow)
+    
+    statusRange.FormatConditions.Delete
+    
+    ' Green for SUCCESS
+    statusRange.FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""SUCCESS"""
+    statusRange.FormatConditions(1).Interior.Color = RGB(198, 239, 206)
+    
+    ' Yellow for WARNING
+    statusRange.FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""WARNING"""
+    statusRange.FormatConditions(2).Interior.Color = RGB(255, 235, 156)
+    
+    ' Blue for INFO
+    statusRange.FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""INFO"""
+    statusRange.FormatConditions(3).Interior.Color = RGB(197, 217, 241)
+    
+    ' Red for ERROR
+    statusRange.FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""ERROR"""
+    statusRange.FormatConditions(4).Interior.Color = RGB(255, 199, 206)
+    
+    ' Sort by timestamp descending
+    wsLog.Range("A1:F" & lastRow).Sort Key1:=wsLog.Range("A1"), Order1:=xlDescending, Header:=xlYes
+End Sub
