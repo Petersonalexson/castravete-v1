@@ -1,11 +1,11 @@
 Option Explicit
 
 '==========================================================
-' MAIN: Refresh Smart View hierarchies, then create arrays
+' MAIN: Refresh Smart View and create arrays
 '==========================================================
-Public Sub RefreshAndCreateArrays()
+Public Sub RefreshSmartViewAndCreateArrays()
     RefreshSmartViewTree
-    CreateSimpleArrays
+    CreateHierarchyArrays
 End Sub
 
 '==========================================================
@@ -16,201 +16,86 @@ Public Sub RefreshSmartViewTree()
     Dim ws As Worksheet
     Dim wsLists As Worksheet
     Dim ConnectionName As String
-    Dim Ret As Long, HeaderRow As Long, LastRow As Long, i As Long
+    Dim Ret As Long, HeaderRow As Long, LastRow As Long, I As Long
     Dim ConnStatus As Integer
     
-    ' Get Lists worksheet
-    On Error Resume Next
     Set wsLists = ThisWorkbook.Worksheets("Lists")
-    If Err.Number <> 0 Then
-        MsgBox "Lists worksheet not found!", vbExclamation
-        Exit Sub
-    End If
-    On Error GoTo 0
     
-    ' Get connection name and hierarchy matrix
-    On Error Resume Next
-    ConnectionName = wsLists.Range("nmConnectionName").Value
-    If Err.Number <> 0 Then
-        MsgBox "Connection name range not found!", vbExclamation
-        Exit Sub
-    End If
-    
-    On Error Resume Next
-    arrSheets = wsLists.Range("Hierarchy_Matrix").Value
-    If Err.Number <> 0 Then
-        MsgBox "Hierarchy_Matrix range not found!", vbExclamation
-        Exit Sub
-    End If
-    On Error GoTo 0
+    With wsLists
+        ConnectionName = .Range("nmConnectionName").Value
+        arrSheets = .Range("Hierarchy_Matrix").Value
+    End With
     
     HeaderRow = 4
     
-    ' Process each sheet in the hierarchy matrix
-    For i = LBound(arrSheets) To UBound(arrSheets)
-        ' Skip if sheet name is empty
-        If Trim(arrSheets(i, 1)) = "" Then
-            GoTo NextSheet
-        End If
-        
-        ' Check if worksheet exists
-        On Error Resume Next
-        Set ws = ThisWorkbook.Worksheets(arrSheets(i, 1))
-        If Err.Number <> 0 Then
-            MsgBox "Worksheet " & arrSheets(i, 1) & " not found!", vbExclamation
-            GoTo NextSheet
-        End If
-        On Error GoTo 0
-        
+    For I = LBound(arrSheets) To UBound(arrSheets)
+        Set ws = ThisWorkbook.Worksheets(arrSheets(I, 1))
         With ws
-            ' Connect to Smart View
-            On Error Resume Next
             Ret = HypUIConnect(.Name, "", "", ConnectionName)
-            If Err.Number <> 0 Then
-                MsgBox "Error connecting to Smart View for " & .Name & ": " & Err.Description, vbExclamation
-                GoTo NextSheet
-            End If
-            
             ConnStatus = HypConnected(.Name)
-            If ConnStatus <> -1 Then
-                MsgBox "Smart View connection failed for " & .Name, vbExclamation
-                GoTo NextSheet
-            End If
-            On Error GoTo 0
-            
-            ' Calculate last row
+            If ConnStatus <> -1 Then Stop
+            'Calculate last row
             LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
-            
-            ' Delete hierarchy rows except hierarchy name
+            'Delete hierarchy rows except hierarchy name
             If LastRow > HeaderRow Then
-                On Error Resume Next
                 .Rows(HeaderRow & ":" & LastRow - 1).Delete Shift:=xlUp
-                If Err.Number <> 0 Then
-                    MsgBox "Error deleting rows in " & .Name & ": " & Err.Description, vbExclamation
-                    GoTo NextSheet
-                End If
-                On Error GoTo 0
             End If
-            
-            ' Get new last row after deletion
             LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
-            
-            ' Set member display option and zoom in
-            On Error Resume Next
             Ret = HypSetSheetOption(.Name, HYP_SVC_OPTIONS_INDEX.HSV_MEMBER_DISPLAY, 1)
-            If Err.Number <> 0 Then
-                MsgBox "Error setting sheet option for " & .Name & ": " & Err.Description, vbExclamation
-                GoTo NextSheet
-            End If
-            
             Ret = HypZoomIn(.Name, .Range("A" & LastRow), 1, False)
-            If Err.Number <> 0 Then
-                MsgBox "Error zooming in for " & .Name & ": " & Err.Description, vbExclamation
-                GoTo NextSheet
-            End If
-            On Error GoTo 0
-            
-            ' Get final last row after zoom in
             LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
             
-            ' Create or update named range
+            ' Delete the named range if it exists
             On Error Resume Next
-            ThisWorkbook.Names(arrSheets(i, 2)).Delete
-            ThisWorkbook.Names.Add Name:=arrSheets(i, 2), RefersTo:=.Range("A" & HeaderRow & ":A" & LastRow)
-            If Err.Number <> 0 Then
-                MsgBox "Error creating named range " & arrSheets(i, 2) & ": " & Err.Description, vbExclamation
-            End If
+            ThisWorkbook.Names(arrSheets(I, 2)).Delete
             On Error GoTo 0
+            
+            ThisWorkbook.Names.Add Name:=arrSheets(I, 2), RefersTo:=.Range("A" & HeaderRow & ":A" & LastRow)
         End With
-        
-NextSheet:
-    Next i
-    
-    MsgBox "Smart View refresh completed!", vbInformation
+    Next I
 End Sub
 
 '==========================================================
-' CREATE SIMPLE ARRAYS
-' Creates arrays from row 3 to last row for each hierarchy
+' CREATE HIERARCHY ARRAYS
+' Creates arrays from row 3 to last row
 '==========================================================
-Public Sub CreateSimpleArrays()
+Public Sub CreateHierarchyArrays()
     Dim wsLists As Worksheet
     Dim arrSheets As Variant
     Dim i As Long
+    Dim rangeName As String
+    Dim hierarchyName As String
+    Dim arrCount As Long
     
-    ' Get Lists worksheet
-    On Error Resume Next
     Set wsLists = ThisWorkbook.Worksheets("Lists")
-    If Err.Number <> 0 Then
-        MsgBox "Lists worksheet not found!", vbExclamation
-        Exit Sub
-    End If
-    On Error GoTo 0
-    
-    ' Get hierarchy matrix
-    On Error Resume Next
     arrSheets = wsLists.Range("Hierarchy_Matrix").Value
-    If Err.Number <> 0 Then
-        MsgBox "Hierarchy_Matrix range not found!", vbExclamation
-        Exit Sub
-    End If
-    On Error GoTo 0
-    
-    ' Process each hierarchy in the matrix
-    Dim arrayCount As Long
-    arrayCount = 0
+    arrCount = 0
     
     For i = LBound(arrSheets) To UBound(arrSheets)
-        Dim rangeName As String
         rangeName = Trim(arrSheets(i, 2))
+        hierarchyName = Trim(arrSheets(i, 3))
         
-        ' Skip if range name is empty
-        If rangeName = "" Then
-            GoTo NextArray
-        End If
+        ' Skip if empty
+        If rangeName = "" Then GoTo NextArray
         
-        ' Check if named range exists
+        ' Create array starting from row 3
         Dim rng As Range
-        On Error Resume Next
-        Set rng = ThisWorkbook.Names(rangeName).RefersToRange
-        If Err.Number <> 0 Or rng Is Nothing Then
-            MsgBox "Named range " & rangeName & " not found!", vbExclamation
-            GoTo NextArray
-        End If
-        On Error GoTo 0
-        
-        ' Get range dimensions
-        Dim startRow As Long
-        Dim endRow As Long
-        
-        startRow = 3
-        endRow = rng.Rows.Count
-        
-        ' Skip if not enough rows
-        If endRow < startRow Then
-            GoTo NextArray
-        End If
-        
-        ' Create array variable
-        Dim arrayName As String
         Dim dataArray As Variant
         
-        ' Use range name for array name
-        arrayName = rangeName & "_Array"
-        
-        ' Create array from row 3 to last row
         On Error Resume Next
-        Set dataArray = rng.Worksheet.Range(rng.Cells(startRow, 1), rng.Cells(endRow, 1)).Value
-        If Err.Number <> 0 Then
-            MsgBox "Error creating array for " & rangeName & ": " & Err.Description, vbExclamation
-            GoTo NextArray
-        End If
+        Set rng = ThisWorkbook.Names(rangeName).RefersToRange
+        If rng Is Nothing Then GoTo NextArray
         On Error GoTo 0
         
-        arrayCount = arrayCount + 1
+        ' Process only if range has at least 3 rows
+        If rng.Rows.Count >= 3 Then
+            ' Create array from row 3 to last row
+            Set dataArray = rng.Worksheet.Range(rng.Cells(3, 1), rng.Cells(rng.Rows.Count, 1)).Value
+            arrCount = arrCount + 1
+        End If
         
 NextArray:
     Next i
     
-    MsgBox "Created " & arrayCount & " arrays", vbInformation
+    MsgBox "Created " & arrCount & " arrays", vbInformation
 End Sub
