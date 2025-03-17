@@ -5,23 +5,19 @@ let
     // Step 2: Extract necessary columns from SmartViewData
     SVCleaned = Table.SelectColumns(SmartViewData, {"Hierarchy Name", "Type", "V_S_C", "Value", "Parent", "KEY"}),
     
-    // Step 3: Reference the XRP Tree array
-    // Get array name from Lists sheet cell E3
-    TreeArrayName = Excel.CurrentWorkbook(){[Name="Lists"]}[Content]{0}[E3],
+    // Step 3: Reference the Hierarchy_Matrix
+    HierarchyMatrix = Excel.CurrentWorkbook(){[Name="Hierarchy_Matrix"]}[Content],
     
-    // Use the array name or default to "XRP_Tree_Array"
-    FinalTreeArrayName = if TreeArrayName = null then "XRP_Tree_Array" else TreeArrayName,
+    // Step 4: Get array names from cells E3 and E5
+    // Hard-coding these for now since we're not using a Lists table
+    FinalTreeArrayName = "XRP_Tree_Array",  // Replace with actual array name
+    FinalListArrayName = "XRP_List_Array",  // Replace with actual array name
+    
+    // Step 5: Reference the XRP Tree and List arrays
     XRPTreeArray = Excel.CurrentWorkbook(){[Name=FinalTreeArrayName]}[Content],
-    
-    // Step 4: Reference the XRP List array
-    // Get array name from Lists sheet cell E5
-    ListArrayName = Excel.CurrentWorkbook(){[Name="Lists"]}[Content]{0}[E5],
-    
-    // Use the array name or default to "XRP_List_Array"
-    FinalListArrayName = if ListArrayName = null then "XRP_List_Array" else ListArrayName,
     XRPListArray = Excel.CurrentWorkbook(){[Name=FinalListArrayName]}[Content],
     
-    // Step 5: Get headers from XRP Tree and transform data
+    // Step 6: Get headers from XRP Tree and transform data
     XRPTreeHeaders = Table.FirstN(XRPTreeArray, 1),
     XRPTreeHeaderList = Table.ToColumns(XRPTreeHeaders),
     
@@ -58,7 +54,7 @@ let
         }
     ),
     
-    // Step 6: Get headers from XRP List and transform data
+    // Step 7: Get headers from XRP List and transform data
     XRPListHeaders = Table.FirstN(XRPListArray, 1),
     XRPListHeaderList = Table.ToColumns(XRPListHeaders),
     
@@ -89,31 +85,31 @@ let
         }
     ),
     
-    // Step 7: Add Hierarchy Name and empty Parent column to List data
+    // Step 8: Add Hierarchy Name and empty Parent column to List data
     XRPListWithHierarchy = Table.AddColumn(XRPListRenamed, "Hierarchy Name", each [V_S_C], type text),
     XRPListWithParent = Table.AddColumn(XRPListWithHierarchy, "XRP_Parent", each "", type text),
     
-    // Step 8: Add Type column to both datasets
+    // Step 9: Add Type column to both datasets
     XRPTreeWithType = Table.AddColumn(XRPTreeRenamed, "Type", each "Tree", type text),
     XRPListWithType = Table.AddColumn(XRPListWithParent, "Type", each "List", type text),
     
-    // Step 9: Create KEY column for both XRP datasets
+    // Step 10: Create KEY column for both XRP datasets
     // KEY is combination of Hierarchy Name and Value
     XRPTreeWithKey = Table.AddColumn(XRPTreeWithType, "KEY", each [Hierarchy Name] & " | " & [XRP_Value], type text),
     XRPListWithKey = Table.AddColumn(XRPListWithType, "KEY", each [Hierarchy Name] & " | " & [XRP_Value], type text),
     
-    // Step 10: Combine both XRP data sources
+    // Step 11: Combine both XRP data sources
     CombinedXRP = Table.Combine({XRPTreeWithKey, XRPListWithKey}),
     
-    // Step 11: Filter and split SmartViewData by Type
+    // Step 12: Filter and split SmartViewData by Type
     SVTree = Table.SelectRows(SVCleaned, each [Type] = "Tree"),
     SVList = Table.SelectRows(SVCleaned, each [Type] = "List"),
     
-    // Step 12: Filter XRP data by Type
+    // Step 13: Filter XRP data by Type
     XRPTree = Table.SelectRows(CombinedXRP, each [Type] = "Tree"),
     XRPList = Table.SelectRows(CombinedXRP, each [Type] = "List"),
     
-    // Step 13: Join SmartView Tree data with XRP Tree data using KEY, V_S_C and Hierarchy Name
+    // Step 14: Join SmartView Tree data with XRP Tree data using KEY, V_S_C and Hierarchy Name
     SVTreeJoin = Table.NestedJoin(
         SVTree,
         {"V_S_C", "Hierarchy Name", "KEY"},  // Filter by V_S_C and Hierarchy Name, match by KEY
@@ -129,7 +125,7 @@ let
         {"XRP_Parent"}
     ),
     
-    // Step 14: Join SmartView List data with XRP List data using KEY and V_S_C
+    // Step 15: Join SmartView List data with XRP List data using KEY and V_S_C
     SVListJoin = Table.NestedJoin(
         SVList,
         {"V_S_C", "KEY"},  // Filter by V_S_C, match by KEY
@@ -145,10 +141,10 @@ let
         {"XRP_Parent"}
     ),
     
-    // Step 15: Combine joined SmartView results
+    // Step 16: Combine joined SmartView results
     CombinedSVWithXRP = Table.Combine({SVTreeWithXRP, SVListWithXRP}),
     
-    // Step 16: Find items in XRP Tree not in SmartView Tree (filtering by V_S_C and Hierarchy Name)
+    // Step 17: Find items in XRP Tree not in SmartView Tree (filtering by V_S_C and Hierarchy Name)
     XRPTreeAnti = Table.NestedJoin(
         XRPTree,
         {"V_S_C", "Hierarchy Name", "KEY"},  // Filter by V_S_C and Hierarchy Name, match by KEY
@@ -159,7 +155,7 @@ let
     ),
     XRPTreeAntiCleaned = Table.RemoveColumns(XRPTreeAnti, {"SVMatches"}),
     
-    // Step 17: Find items in XRP List not in SmartView List (filtering by V_S_C)
+    // Step 18: Find items in XRP List not in SmartView List (filtering by V_S_C)
     XRPListAnti = Table.NestedJoin(
         XRPList,
         {"V_S_C", "KEY"},  // Filter by V_S_C, match by KEY
@@ -170,26 +166,26 @@ let
     ),
     XRPListAntiCleaned = Table.RemoveColumns(XRPListAnti, {"SVMatches"}),
     
-    // Step 18: Combine XRP-only items
+    // Step 19: Combine XRP-only items
     CombinedXRPOnly = Table.Combine({XRPTreeAntiCleaned, XRPListAntiCleaned}),
     
-    // Step 19: Add empty SmartView columns to XRP-only data
+    // Step 20: Add empty SmartView columns to XRP-only data
     XRPOnlyWithSV = Table.AddColumn(CombinedXRPOnly, "Value", each null),
     XRPOnlyWithSVMore = Table.AddColumn(XRPOnlyWithSV, "Parent", each null),
     
-    // Step 20: Rename XRP_Value to Value for XRP-only records for consistent display
+    // Step 21: Rename XRP_Value to Value for XRP-only records for consistent display
     XRPOnlyRenamed = Table.RenameColumns(XRPOnlyWithSVMore, {{"XRP_Value", "Value"}}),
     
-    // Step 21: Rename Value/Parent to SV_Value/SV_Parent for consistency
+    // Step 22: Rename Value/Parent to SV_Value/SV_Parent for consistency in SmartView data
     CombinedSVRenamed = Table.RenameColumns(CombinedSVWithXRP, {
         {"Value", "SV_Value"},
         {"Parent", "SV_Parent"}
     }),
     
-    // Step 22: Combine all results
+    // Step 23: Combine all results
     AllResults = Table.Combine({CombinedSVRenamed, XRPOnlyRenamed}),
     
-    // Step 23: Add Status column based on comparison
+    // Step 24: Add Status column based on comparison
     WithStatus = Table.AddColumn(AllResults, "Status", each
         if [SV_Value] = null then "Missing in SmartView"
         else if [XRP_Parent] = null and [Type] = "Tree" then "Missing in XRP"
@@ -199,19 +195,19 @@ let
         type text
     ),
     
-    // Step 24: Final column cleanup and selection
+    // Step 25: Final column cleanup and selection
     FinalColumns = Table.SelectColumns(WithStatus, {
         "Hierarchy Name", "Type", "V_S_C", "SV_Value", "SV_Parent", "XRP_Parent", "Status"
     }),
     
-    // Step 25: Rename columns for clarity
+    // Step 26: Rename columns for clarity
     RenamedColumns = Table.RenameColumns(FinalColumns, {
         {"SV_Value", "Value"},
         {"SV_Parent", "SmartView Parent"},
         {"XRP_Parent", "XRP Parent"}
     }),
     
-    // Step 26: Sort results
+    // Step 27: Sort results
     SortedResults = Table.Sort(RenamedColumns, {
         {"Type", Order.Ascending},
         {"V_S_C", Order.Ascending},
