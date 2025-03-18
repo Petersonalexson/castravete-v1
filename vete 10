@@ -6,48 +6,29 @@ let
     XRPTreeArray = Excel.CurrentWorkbook(){[Name="XRP_Tree_Array"]}[Content],
     XRPListArray = Excel.CurrentWorkbook(){[Name="XRP_List_Array"]}[Content],
     
-    // Reference Hierarchy_Matrix for final filtering
-    HierarchyMatrix = Excel.CurrentWorkbook(){[Name="Hierarchy_Matrix"]}[Content],
+    // Step 3: Process Tree data
+    // Convert first row to headers
+    XRPTreeWithHeaders = Table.PromoteHeaders(XRPTreeArray, [PromoteAllScalars=true]),
     
-    // Step 3: Process Tree data - skip header promotion since headers are already present
-    // Skip the header row
-    XRPTreeData = Table.Skip(XRPTreeArray, 1),
+    // Create a structured Tree table with proper column names
+    XRPTreeClean = Table.SelectColumns(XRPTreeWithHeaders, {"Dimension_Name", "Value", "Parent", "V_S_C"}),
     
-    // Extract column names from the first row of the original array
-    XRPTreeColumnNames = Table.ToRecords(Table.FirstN(XRPTreeArray, 1)){0},
-    
-    // Create a structured Tree table with column names from the first row
-    XRPTreeWithNames = Table.RenameColumns(XRPTreeData, 
-        List.Transform(
-            {0..Record.FieldCount(XRPTreeColumnNames)-1},
-            each {Text.From(_), Record.Field(XRPTreeColumnNames, Text.From(_))}
-        )
-    ),
-    
-    // Use the proper column names and add type-specific columns
-    XRPTreeRename = Table.RenameColumns(XRPTreeWithNames, {{"Dimension_Name", "Hierarchy Name"}}),
-    XRPTreeWithType = Table.AddColumn(XRPTreeRename, "Type", each "Tree", type text),
+    // Rename and add type-specific columns
+    XRPTreeTable = Table.RenameColumns(XRPTreeClean, {{"Dimension_Name", "Hierarchy Name"}}),
+    XRPTreeWithType = Table.AddColumn(XRPTreeTable, "Type", each "Tree", type text),
     
     // Add KEY column to Tree data - with explicit text conversion
     XRPTreeWithKey = Table.AddColumn(XRPTreeWithType, "KEY", each Text.From([Hierarchy Name]) & " | " & Text.From([Value]), type text),
     
-    // Step 4: Process List data - skip header promotion since headers are already present
-    // Skip the header row
-    XRPListData = Table.Skip(XRPListArray, 1),
+    // Step 4: Process List data
+    // Convert first row to headers
+    XRPListWithHeaders = Table.PromoteHeaders(XRPListArray, [PromoteAllScalars=true]),
     
-    // Extract column names from the first row of the original array
-    XRPListColumnNames = Table.ToRecords(Table.FirstN(XRPListArray, 1)){0},
-    
-    // Create a structured List table with column names from the first row
-    XRPListWithNames = Table.RenameColumns(XRPListData, 
-        List.Transform(
-            {0..Record.FieldCount(XRPListColumnNames)-1},
-            each {Text.From(_), Record.Field(XRPListColumnNames, Text.From(_))}
-        )
-    ),
+    // Create a structured List table
+    XRPListClean = Table.SelectColumns(XRPListWithHeaders, {"Value", "V_S_C"}),
     
     // For List data, create Hierarchy Name from V_S_C and add empty Parent
-    XRPListWithHierarchy = Table.AddColumn(XRPListWithNames, "Hierarchy Name", each [V_S_C], type text),
+    XRPListWithHierarchy = Table.AddColumn(XRPListClean, "Hierarchy Name", each [V_S_C], type text),
     XRPListWithParent = Table.AddColumn(XRPListWithHierarchy, "Parent", each "", type text),
     XRPListWithType = Table.AddColumn(XRPListWithParent, "Type", each "List", type text),
     
@@ -161,39 +142,8 @@ let
         type text
     ),
     
-    // Step 18: Process Hierarchy_Matrix for filtering at the end
-    HierarchyMatrixData = Table.Skip(HierarchyMatrix, 1),
-    HierarchyMatrixHeader = Table.FirstN(HierarchyMatrix, 1),
-    
-    // Extract column names from the first row
-    HierarchyMatrixColumnNames = Table.ToRecords(HierarchyMatrixHeader){0},
-    
-    // Create a structured table with column names
-    HierarchyMatrixWithNames = Table.RenameColumns(HierarchyMatrixData, 
-        List.Transform(
-            {0..Record.FieldCount(HierarchyMatrixColumnNames)-1},
-            each {Text.From(_), Record.Field(HierarchyMatrixColumnNames, Text.From(_))}
-        )
-    ),
-    
-    // Create combinations of V_S_C and Hierarchy Name from Hierarchy_Matrix
-    HierarchyMatrixCombinations = Table.AddColumn(
-        HierarchyMatrixWithNames, 
-        "Combination", 
-        each [V_S_C] & "|" & [Hierarchy Name], 
-        type text
-    ),
-    
-    // Get the list of valid V_S_C + Hierarchy Name combinations
-    ValidCombinations = List.Distinct(Table.Column(HierarchyMatrixCombinations, "Combination")),
-    
-    // Step 19: Filter the final results based on Hierarchy_Matrix combinations
-    FilteredResults = Table.SelectRows(WithStatus, each
-        List.Contains(ValidCombinations, [V_S_C] & "|" & [Hierarchy Name])
-    ),
-    
-    // Step 20: Select and rename final columns
-    FinalColumns = Table.SelectColumns(FilteredResults, {
+    // Step 18: Select and rename final columns
+    FinalColumns = Table.SelectColumns(WithStatus, {
         "Type", "V_S_C", "Hierarchy Name", "SV_Value", "SV_Parent", "XRP_Parent", "Status"
     }),
     
@@ -203,7 +153,7 @@ let
         {"XRP_Parent", "XRP Parent"}
     }),
     
-    // Step 21: Sort results
+    // Step 19: Sort results
     SortedResults = Table.Sort(FinalRenamed, {
         {"Type", Order.Ascending},
         {"V_S_C", Order.Ascending},
