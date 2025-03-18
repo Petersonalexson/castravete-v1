@@ -1,39 +1,192 @@
 let
-    // Step A: Read from named range "XRP_Tree_Array"
-    Source = Excel.CurrentWorkbook(){[Name="XRP_Tree_Array"]}[Content],
+    // -------------------------------------------------------------------
+    // 1) REFERENCE THE EXISTING SMARTVIEWDATA QUERY
+    //    (We assume it has columns: KEY, Type, Hierarchy Name, Value, Parent, etc.)
+    //    If you have a different query name, adjust "SmartViewData" below.
+    // -------------------------------------------------------------------
+    SV = SmartViewData,
 
-    // Step B: Promote the first row to actual headers
-    PromotedHeaders = Table.PromoteHeaders(Source),
+    // -------------------------------------------------------------------
+    // 2) READ & CLEAN "XRP_Tree_Array"
+    // -------------------------------------------------------------------
+    XRPTreeRaw        = Excel.CurrentWorkbook(){[Name="XRP_Tree_Array"]}[Content],
+    XRPTreePromoted   = Table.PromoteHeaders(XRPTreeRaw),
 
-    // Step C: If needed, rename columns. Example: "Dimension_Name" -> "Hierarchy Name".
-    //         If your named range already has correct headers, skip or adjust below.
-    Renamed = Table.RenameColumns(
-        PromotedHeaders,
+    // Example rename: "Dimension_Name" -> "Hierarchy Name" if needed
+    XRPTreeRenamed = Table.RenameColumns(
+        XRPTreePromoted,
         {
-            {"Dimension_Name", "Hierarchy Name"}  // only if you have a column Dimension_Name
-        }
+            {"Dimension_Name", "Hierarchy Name"} // skip/adjust if not needed
+        },
+        MissingField.Ignore
     ),
 
-    // Step D: Convert Parent column to Text, in case it’s numeric/blank in the sheet
-    ParentAsText = Table.TransformColumnTypes(
-        Renamed,
-        {{"Parent", type text}}
-    ),
+    // Ensure Parent is text (avoids type error if numeric/blank)
+    XRPTreeParentAsText = Table.TransformColumnTypes(XRPTreeRenamed, {{"Parent", type text}}),
 
-    // Step E: Add a Key column, forcing text conversion for both [Hierarchy Name] and [Value]
-    WithKey = Table.AddColumn(
-        ParentAsText,
+    // Add KEY = [Hierarchy Name] & " | " & [Value]
+    XRPTreeWithKey = Table.AddColumn(
+        XRPTreeParentAsText,
         "KEY",
         each Text.From([Hierarchy Name]) & " | " & Text.From([Value]),
         type text
     ),
 
-    // Step F: Mark the entire table as Type = "Tree"
-    WithType = Table.AddColumn(
-        WithKey,
-        "Type",
+    // Mark "Type" = Tree
+    XRPTree = Table.AddColumn(
+        XRPTreeWithKey,
+        "XRP_Type",
         each "Tree",
         type text
+    ),
+
+    // -------------------------------------------------------------------
+    // 3) READ & CLEAN "XRP_List_Array"
+    // -------------------------------------------------------------------
+    XRPListRaw       = Excel.CurrentWorkbook(){[Name="XRP_List_Array"]}[Content],
+    XRPListPromoted  = Table.PromoteHeaders(XRPListRaw),
+
+    // If columns already are "Value" and "V_S_C", skip rename or adjust as needed
+    XRPListRenamed = XRPListPromoted,  // no rename done here
+
+    // Add a blank Parent column
+    XRPListWithParent = Table.AddColumn(
+        XRPListRenamed,
+        "Parent",
+        each "",
+        type text
+    ),
+
+    // Add KEY = [Hierarchy Name] & " | " & [Value]
+    // For List, we first define "Hierarchy Name" = [V_S_C] if that's your logic
+    XRPListWithHierarchy = Table.AddColumn(
+        XRPListWithParent,
+        "Hierarchy Name",
+        each Text.From([V_S_C]),
+        type text
+    ),
+
+    // Then the actual KEY
+    XRPListWithKey = Table.AddColumn(
+        XRPListWithHierarchy,
+        "KEY",
+        each [Hierarchy Name] & " | " & Text.From([Value]),
+        type text
+    ),
+
+    // Mark "Type" = List
+    XRPList = Table.AddColumn(
+        XRPListWithKey,
+        "XRP_Type",
+        each "List",
+        type text
+    ),
+
+    // -------------------------------------------------------------------
+    // 4) COMBINE TREE + LIST INTO ONE XRP TABLE
+    // -------------------------------------------------------------------
+    CombinedXRP = Table.Combine({XRPTree, XRPList}),
+
+    // -------------------------------------------------------------------
+    // 5) FULL OUTER JOIN: SMARTVIEW vs. XRP BY KEY
+    //    This ensures we see items only in SmartView, only in XRP, or both.
+    // -------------------------------------------------------------------
+    // We do it by joining from SV to CombinedXRP with JoinKind.FullOuter
+    FullJoin = Table.NestedJoin(
+        SV, 
+        {"KEY"}, 
+        CombinedXRP, 
+        {"KEY"}, 
+        "XRPData", 
+        JoinKind.FullOuter
+    ),
+
+    // -------------------------------------------------------------------
+    // 6) EXPAND COLUMNS FROM BOTH SIDES
+    //    For the left side (SmartView), we rename them to SV_... so they won't collide.
+    //    For the right side (XRP), we rename them to XRP_... 
+    //
+    //    But if you're sure the column names differ, you can directly expand. 
+    //    We'll first expand everything from the left, then from the right.
+    //
+    //    Actually, because we used NestedJoin with "SV" as the left table, 
+    //    the existing columns from SmartView are already "top-level." 
+    //    We'll handle them as-is, then expand the "XRPData" table for the right side.
+    // -------------------------------------------------------------------
+    // If the left side (SV) is null for some rows, that means "Missing in SmartView" is false => actually "Missing in SV" means the row came from the right side only. 
+    // We'll see that after expansion.
+
+    // Expand the table from the right side:
+    Expanded = Table.ExpandTableColumn(
+        FullJoin,
+        "XRPData",
+        {"Hierarchy Name", "Value", "Parent", "V_S_C", "KEY", "XRP_Type"},
+        {
+            "XRP_HierarchyName",
+            "XRP_Value",
+            "XRP_Parent",
+            "XRP_V_S_C",
+            "XRP_KEY",
+            "XRP_Type"
+        }
+    ),
+
+    // -------------------------------------------------------------------
+    // 7) RENAME THE ORIGINAL SMARTVIEW COLUMNS (IF YOU WANT DISTINCT NAMES)
+    //    E.g., Type -> SV_Type, Parent -> SV_Parent, Value -> SV_Value, etc.
+    // -------------------------------------------------------------------
+    SVRenamed = Table.RenameColumns(
+        Expanded,
+        {
+            {"Type", "SV_Type"},
+            {"Hierarchy Name", "SV_HierarchyName"},
+            {"Value", "SV_Value"},
+            {"Parent", "SV_Parent"}
+        },
+        MissingField.Ignore
+    ),
+
+    // -------------------------------------------------------------------
+    // 8) ADD A STATUS COLUMN
+    //    Logic:
+    //      - If [SV_Type] = null => row is from the XRP side only => "Missing in SmartView"
+    //      - Else if [XRP_Type] = null => row is from the SV side only => "Missing in XRP"
+    //      - Else if [SV_Type] = "Tree" and [SV_Parent] <> [XRP_Parent] => "Different Parent"
+    //      - Else "Match"
+    // -------------------------------------------------------------------
+    WithStatus = Table.AddColumn(
+        SVRenamed,
+        "Status",
+        each
+            if [SV_Type] = null then
+                "Missing in SmartView"
+            else if [XRP_Type] = null then
+                "Missing in XRP"
+            else if [SV_Type] = "Tree" and [SV_Parent] <> [XRP_Parent] then
+                "Different Parent"
+            else
+                "Match"
+    ),
+
+    // -------------------------------------------------------------------
+    // 9) OPTIONAL: REORDER OR SELECT SPECIFIC COLUMNS
+    // -------------------------------------------------------------------
+    Reordered = Table.ReorderColumns(
+        WithStatus,
+        {
+            "Status",
+            "KEY",
+            "SV_Type",
+            "SV_HierarchyName",
+            "SV_Value",
+            "SV_Parent",
+            "XRP_Type",
+            "XRP_HierarchyName",
+            "XRP_Value",
+            "XRP_Parent",
+            "XRP_V_S_C"
+        },
+        MissingField.Ignore
     )
 in
-    WithType
+    Reordered
