@@ -1,16 +1,13 @@
 let
-    //--------------------------------------------------------------------
-    // 0) REFERENCE SMARTVIEWDATA
-    //    Keep only Hierarchy Name, Value, Parent. Trim & Upper to unify
-    //--------------------------------------------------------------------
+    // -----------------------------------------------------------
+    // 0) SMARTVIEWDATA: Keep {Hierarchy Name, Value, Parent},
+    //    Convert them to text, TRIM & UPPER to unify.
+    // -----------------------------------------------------------
     SVRaw = SmartViewData,
-
     SVSelected = Table.SelectColumns(
         SVRaw,
         {"Hierarchy Name", "Value", "Parent"}
     ),
-
-    // Convert to Text, then Trim & Upper
     SVAsText = Table.TransformColumnTypes(
         SVSelected,
         {
@@ -19,7 +16,6 @@ let
             {"Parent", Text.Type}
         }
     ),
-
     SVClean = Table.TransformColumns(
         SVAsText,
         {
@@ -29,19 +25,17 @@ let
         }
     ),
 
-    //--------------------------------------------------------------------
-    // 1) PREP XRP TREE (Dimension_Name -> Hierarchy Name, trim/upper)
-    //--------------------------------------------------------------------
+    // -----------------------------------------------------------
+    // 1) PREP XRP TREE
+    //    - Rename Dimension_Name -> Hierarchy Name if it exists
+    //    - Force text, TRIM & UPPER
+    // -----------------------------------------------------------
     XRPTreeRaw = Excel.CurrentWorkbook(){[Name="XRP_Tree_Array"]}[Content],
-
-    // If "Dimension_Name" is your old column name, rename it to "Hierarchy Name"
     XRPTreeRenamed = Table.RenameColumns(
         XRPTreeRaw,
         {{"Dimension_Name", "Hierarchy Name"}},
         MissingField.Ignore
     ),
-
-    // Force text, then Trim & Upper
     XRPTreeAsText = Table.TransformColumnTypes(
         XRPTreeRenamed,
         {
@@ -50,7 +44,6 @@ let
             {"Parent", Text.Type}
         }
     ),
-
     XRPTreeClean = Table.TransformColumns(
         XRPTreeAsText,
         {
@@ -60,33 +53,29 @@ let
         }
     ),
 
-    //--------------------------------------------------------------------
-    // 2) PREP XRP LIST (V_S_C -> Hierarchy Name, add blank Parent if missing)
-    //--------------------------------------------------------------------
+    // -----------------------------------------------------------
+    // 2) PREP XRP LIST
+    //    - Rename V_S_C -> Hierarchy Name
+    //    - Ensure Parent column
+    //    - Force text, TRIM & UPPER
+    // -----------------------------------------------------------
     XRPListRaw = Excel.CurrentWorkbook(){[Name="XRP_List_Array"]}[Content],
-
-    // Rename V_S_C -> Hierarchy Name
     XRPListRenamed = Table.RenameColumns(
         XRPListRaw,
         {{"V_S_C", "Hierarchy Name"}},
         MissingField.Ignore
     ),
-
-    // Ensure we have a Parent column (blank if missing)
-    XRPListWithParent = if not List.Contains(Table.ColumnNames(XRPListRenamed), "Parent") 
+    XRPListEnsureParent = if not List.Contains(Table.ColumnNames(XRPListRenamed), "Parent") 
         then Table.AddColumn(XRPListRenamed, "Parent", each "", Text.Type)
         else XRPListRenamed,
-
-    // Force text, Trim & Upper
     XRPListAsText = Table.TransformColumnTypes(
-        XRPListWithParent,
+        XRPListEnsureParent,
         {
             {"Hierarchy Name", Text.Type},
             {"Value", Text.Type},
             {"Parent", Text.Type}
         }
     ),
-
     XRPListClean = Table.TransformColumns(
         XRPListAsText,
         {
@@ -96,17 +85,15 @@ let
         }
     ),
 
-    //--------------------------------------------------------------------
+    // -----------------------------------------------------------
     // 3) COMBINE XRP TREE + LIST
-    //    We'll just call it "XRPCombined"
-    //--------------------------------------------------------------------
+    // -----------------------------------------------------------
     XRPCombined = Table.Combine({XRPTreeClean, XRPListClean}),
 
-    //--------------------------------------------------------------------
+    // -----------------------------------------------------------
     // 4) INNER JOIN ON {Hierarchy Name, Value}
-    //    Expand Parent from the XRP side => "ParentXRP"
-    //--------------------------------------------------------------------
-    // This only returns rows that exist in both SmartViewData and XRP
+    //    Expand Parent => "Parent.1"
+    // -----------------------------------------------------------
     InnerJoin = Table.NestedJoin(
         SVClean,
         {"Hierarchy Name", "Value"},
@@ -115,35 +102,45 @@ let
         "XRPRows",
         JoinKind.Inner
     ),
-
     Expanded = Table.ExpandTableColumn(
         InnerJoin,
         "XRPRows",
         {"Parent"},
-        {"ParentXRP"}
+        {"Parent.1"}
     ),
 
-    //--------------------------------------------------------------------
-    // 5) ADD STATUS: Compare Parent vs. ParentXRP
-    //--------------------------------------------------------------------
+    // -----------------------------------------------------------
+    // 5) STATUS LOGIC:
+    //    If both parents are blank => "Mismatch"
+    //    Else if they are equal => "Match"
+    //    Else => "Mismatch"
+    // -----------------------------------------------------------
     WithStatus = Table.AddColumn(
         Expanded,
         "Status",
-        each if [Parent] = [ParentXRP] 
-             then "Match"
-             else "Mismatch"
+        each
+            let
+                svParent = [Parent] & "",    // null-safe
+                xrpParent = [Parent.1] & ""
+            in
+                if svParent = "" and xrpParent = "" then
+                    "Mismatch"
+                else if svParent = xrpParent then
+                    "Match"
+                else
+                    "Mismatch"
     ),
 
-    //--------------------------------------------------------------------
-    // 6) SELECT FINAL COLUMNS
-    //--------------------------------------------------------------------
+    // -----------------------------------------------------------
+    // 6) FINAL COLUMNS
+    // -----------------------------------------------------------
     Final = Table.SelectColumns(
         WithStatus,
         {
             "Hierarchy Name",
             "Value",
             "Parent",
-            "ParentXRP",
+            "Parent.1",
             "Status"
         }
     )
