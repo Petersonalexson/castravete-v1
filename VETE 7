@@ -29,19 +29,19 @@ let
     XRPTreeCleaned = Table.SelectColumns(
         XRPTreeDataWithHeaders, 
         {
-            Text.From(TreeNameCol), 
-            Text.From(TreeValueCol), 
-            Text.From(TreeParentCol), 
-            Text.From(TreeVSCCol)
+            Number.ToText(TreeNameCol), 
+            Number.ToText(TreeValueCol), 
+            Number.ToText(TreeParentCol), 
+            Number.ToText(TreeVSCCol)
         }
     ),
     XRPTreeRenamed = Table.RenameColumns(
         XRPTreeCleaned, 
         {
-            {Text.From(TreeNameCol), "Hierarchy Name"},
-            {Text.From(TreeValueCol), "XRP_Value"},
-            {Text.From(TreeParentCol), "XRP_Parent"},
-            {Text.From(TreeVSCCol), "V_S_C"}
+            {Number.ToText(TreeNameCol), "Hierarchy Name"},
+            {Number.ToText(TreeValueCol), "XRP_Value"},
+            {Number.ToText(TreeParentCol), "XRP_Parent"},
+            {Number.ToText(TreeVSCCol), "V_S_C"}
         }
     ),
     
@@ -65,15 +65,15 @@ let
     XRPListCleaned = Table.SelectColumns(
         XRPListDataWithHeaders, 
         {
-            Text.From(ListValueCol), 
-            Text.From(ListVSCCol)
+            Number.ToText(ListValueCol), 
+            Number.ToText(ListVSCCol)
         }
     ),
     XRPListRenamed = Table.RenameColumns(
         XRPListCleaned, 
         {
-            {Text.From(ListValueCol), "XRP_Value"},
-            {Text.From(ListVSCCol), "V_S_C"}
+            {Number.ToText(ListValueCol), "XRP_Value"},
+            {Number.ToText(ListVSCCol), "V_S_C"}
         }
     ),
     
