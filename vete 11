@@ -1,12 +1,18 @@
 let
     //--------------------------------------------------------------------
-    // 0) REFERENCE THE EXISTING SmartViewData
-    //    Must have: KEY, Hierarchy Name, Value, Parent, Type
+    // 0) REFERENCE SMARTVIEWDATA, KEEP NEEDED COLUMNS
+    //    Must have at least: KEY, Hierarchy Name, Value, Parent, Type
     //--------------------------------------------------------------------
-    SV = SmartViewData,
+    SourceSV = SmartViewData,
+    SV = Table.SelectColumns(
+        SourceSV,
+        {"KEY", "Hierarchy Name", "Value", "Parent", "Type"}
+    ),
 
     //--------------------------------------------------------------------
     // 1) LOAD & PREP XRP TREE
+    //    Rename Dimension_Name -> Hierarchy Name if needed,
+    //    Force columns to text, create KEY, keep only necessary columns
     //--------------------------------------------------------------------
     TreeRaw = Excel.CurrentWorkbook(){[Name="XRP_Tree_Array"]}[Content],
 
@@ -17,18 +23,17 @@ let
         MissingField.Ignore
     ),
 
-    // Force text types for Hierarchy Name, Value, Parent
+    // Make sure "Hierarchy Name", "Value", and "Parent" are text
     TreeAsText = Table.TransformColumnTypes(
         TreeRenamed,
         {
             {"Hierarchy Name", Text.Type},
             {"Value", Text.Type},
             {"Parent", Text.Type}
-        },
-        "en-US"
+        }
     ),
 
-    // Create KEY = Hierarchy Name & " | " & Value
+    // Create KEY if not already present
     TreeWithKey = Table.AddColumn(
         TreeAsText,
         "KEY",
@@ -36,41 +41,42 @@ let
         Text.Type
     ),
 
-    // Keep only the four columns we want
+    // Keep only [Hierarchy Name, Value, Parent, KEY]
     TreeSelected = Table.SelectColumns(
         TreeWithKey,
-        {"Value", "Hierarchy Name", "Parent", "KEY"}
+        {"Hierarchy Name", "Value", "Parent", "KEY"}
     ),
 
     //--------------------------------------------------------------------
     // 2) LOAD & PREP XRP LIST
+    //    Rename V_S_C -> Hierarchy Name, ensure Parent column, create KEY,
+    //    keep only necessary columns
     //--------------------------------------------------------------------
     ListRaw = Excel.CurrentWorkbook(){[Name="XRP_List_Array"]}[Content],
 
-    // Rename V_S_C -> Hierarchy Name if it exists
+    // Rename V_S_C -> Hierarchy Name
     ListRenamed = Table.RenameColumns(
         ListRaw,
         {{"V_S_C", "Hierarchy Name"}},
         MissingField.Ignore
     ),
 
-    // If Parent doesn't exist, add it as blank
-    ListParentCheck = if not List.RenameColumns(List.Columns(ListRenamed),{})?["Parent"]? 
-                     then Table.AddColumn(ListRenamed, "Parent", each "", Text.Type) 
-                     else ListRenamed,
+    // If no Parent column, add one (blank)
+    ListWithParent = if not List.Contains(Table.ColumnNames(ListRenamed), "Parent")
+        then Table.AddColumn(ListRenamed, "Parent", each "", Text.Type)
+        else ListRenamed,
 
-    // Force text type for [Hierarchy Name], [Value], [Parent]
+    // Force columns to text
     ListAsText = Table.TransformColumnTypes(
-        ListParentCheck,
+        ListWithParent,
         {
             {"Hierarchy Name", Text.Type},
             {"Value", Text.Type},
             {"Parent", Text.Type}
-        },
-        "en-US"
+        }
     ),
 
-    // KEY = Hierarchy Name & " | " & Value
+    // Create KEY
     ListWithKey = Table.AddColumn(
         ListAsText,
         "KEY",
@@ -78,10 +84,10 @@ let
         Text.Type
     ),
 
-    // Keep four columns
+    // Keep only [Hierarchy Name, Value, Parent, KEY]
     ListSelected = Table.SelectColumns(
         ListWithKey,
-        {"Value", "Hierarchy Name", "Parent", "KEY"}
+        {"Hierarchy Name", "Value", "Parent", "KEY"}
     ),
 
     //--------------------------------------------------------------------
@@ -91,6 +97,7 @@ let
 
     //--------------------------------------------------------------------
     // 4) MERGE #1: SMARTVIEW -> CombinedXRP (Left Outer)
+    //    Expand only Parent from XRP as ParentXRP, then build Status
     //--------------------------------------------------------------------
     SVLeftJoin = Table.NestedJoin(
         SV,
@@ -100,8 +107,6 @@ let
         "XRPData",
         JoinKind.LeftOuter
     ),
-
-    // Expand only the [Parent] from XRP, rename it to ParentXRP
     SVExpanded = Table.ExpandTableColumn(
         SVLeftJoin,
         "XRPData",
@@ -109,30 +114,30 @@ let
         {"ParentXRP"}
     ),
 
-    // 4b) Add Status column
     // If ParentXRP=null => "Missing in ERP"
-    // If Type=Tree and Parent<>ParentXRP => "Different Parent"
-    // else => "Match"
-    SVWithStatus = Table.AddColumn(
+    // Else if Type="Tree" and Parent<>ParentXRP => "Different Parent"
+    // Else => "Match"
+    WithStatus1 = Table.AddColumn(
         SVExpanded,
         "Status",
-        each if [ParentXRP] = null 
-             then "Missing in ERP"
-             else if [Type] = "Tree" and [Parent] <> [ParentXRP] 
-             then "Different Parent"
-             else "Match"
+        each if [ParentXRP] = null then
+            "Missing in ERP"
+        else if [Type] = "Tree" and [Parent] <> [ParentXRP] then
+            "Different Parent"
+        else
+            "Match"
     ),
 
     //--------------------------------------------------------------------
     // 5) MERGE #2: CombinedXRP -> SmartView (Left Anti)
-    //    Rows in XRP not in SV => "Missing in SmartView"
+    //    Finds rows in XRP that do not exist in SmartView => "Missing in SmartView"
     //--------------------------------------------------------------------
     XRPAntiJoin = Table.NestedJoin(
         CombinedXRP,
         {"KEY"},
         SV,
         {"KEY"},
-        "SVMatches",
+        "SVRows",
         JoinKind.LeftAnti
     ),
 
@@ -142,34 +147,28 @@ let
         {{"Parent", "ParentXRP"}}
     ),
 
-    // Add placeholders for the SV columns
-    // (Hierarchy Name, Value are already present, we add Parent="" if needed, plus Status)
-    XRPWithParent = Table.AddColumn(
+    // For these leftover rows, add "Parent"= "", "Status"="Missing in SmartView"
+    XRPPlusParent = Table.AddColumn(
         XRPRenamed,
         "Parent",
         each "",
         Text.Type
     ),
-
-    // Add Status
-    XRPWithStatus = Table.AddColumn(
-        XRPWithParent,
+    WithStatus2 = Table.AddColumn(
+        XRPPlusParent,
         "Status",
         each "Missing in SmartView"
     ),
 
     //--------------------------------------------------------------------
-    // 6) COMBINE THE TWO RESULT SETS
+    // 6) COMBINE THE TWO RESULT SETS & REORDER
     //--------------------------------------------------------------------
-    FinalCombined = Table.Combine({SVWithStatus, XRPWithStatus}),
+    Combined = Table.Combine({WithStatus1, WithStatus2}),
 
-    //--------------------------------------------------------------------
-    // 7) SELECT & REORDER EXACT COLUMNS:
-    //    KEY, Hierarchy Name, Value, Parent, ParentXRP, Status
-    //--------------------------------------------------------------------
-    Reordered = Table.SelectColumns(
-        FinalCombined,
+    // Final reorder: KEY, Hierarchy Name, Value, Parent, ParentXRP, Status
+    Final = Table.SelectColumns(
+        Combined,
         {"KEY", "Hierarchy Name", "Value", "Parent", "ParentXRP", "Status"}
     )
 in
-    Reordered
+    Final
