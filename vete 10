@@ -7,12 +7,25 @@ let
     XRPListArray = Excel.CurrentWorkbook(){[Name="XRP_List_Array"]}[Content],
     MappingMatrix = Excel.CurrentWorkbook(){[Name="Mapping_Matrix"]}[Content],
     
-    // Step 3: Process Mapping Matrix to get valid combinations
-    MappingMatrixHeaders = Table.PromoteHeaders(MappingMatrix, [PromoteAllScalars=true]),
+    // Step 3: Process Mapping Matrix safely
+    // Convert first row to headers
+    MappingMatrixWithHeaders = Table.PromoteHeaders(MappingMatrix, [PromoteAllScalars=true]),
     
-    // Create lists of valid Hierarchy Names and V_S_C values
-    ValidHierarchyNames = List.Distinct(Table.Column(MappingMatrixHeaders, "Hierarchy Name")),
-    ValidVSCs = List.Distinct(Table.Column(MappingMatrixHeaders, "V_S_C")),
+    // Create lists of valid Hierarchy Names and V_S_C values using safe methods
+    // First ensure the columns exist, then extract values
+    HasHierarchyColumn = Table.HasColumns(MappingMatrixWithHeaders, {"Hierarchy Name"}),
+    HasVSCColumn = Table.HasColumns(MappingMatrixWithHeaders, {"V_S_C"}),
+    
+    // Extract values if columns exist, otherwise use empty lists
+    HierarchyNameValues = if HasHierarchyColumn then 
+                             List.Buffer(List.Distinct(Table.Column(MappingMatrixWithHeaders, "Hierarchy Name")))
+                          else 
+                             {},
+                             
+    VSCValues = if HasVSCColumn then 
+                  List.Buffer(List.Distinct(Table.Column(MappingMatrixWithHeaders, "V_S_C")))
+               else 
+                  {},
     
     // Step 4: Process Tree data
     // Convert first row to headers
@@ -25,10 +38,13 @@ let
     XRPTreeTable = Table.RenameColumns(XRPTreeClean, {{"Dimension_Name", "Hierarchy Name"}}),
     XRPTreeWithType = Table.AddColumn(XRPTreeTable, "Type", each "Tree", type text),
     
-    // Filter to include only items in the mapping matrix
-    XRPTreeFiltered = Table.SelectRows(XRPTreeWithType, each 
-        List.Contains(ValidHierarchyNames, [Hierarchy Name]) and 
-        List.Contains(ValidVSCs, [V_S_C])),
+    // Filter to include only items in the mapping matrix - only if we have mapping values
+    XRPTreeFiltered = if List.Count(HierarchyNameValues) > 0 and List.Count(VSCValues) > 0 then
+                        Table.SelectRows(XRPTreeWithType, each 
+                            List.Contains(HierarchyNameValues, [Hierarchy Name]) and 
+                            List.Contains(VSCValues, [V_S_C]))
+                     else
+                        XRPTreeWithType,
     
     // Add KEY column to Tree data - with explicit text conversion
     XRPTreeWithKey = Table.AddColumn(XRPTreeFiltered, "KEY", each Text.From([Hierarchy Name]) & " | " & Text.From([Value]), type text),
@@ -45,10 +61,13 @@ let
     XRPListWithParent = Table.AddColumn(XRPListWithHierarchy, "Parent", each "", type text),
     XRPListWithType = Table.AddColumn(XRPListWithParent, "Type", each "List", type text),
     
-    // Filter to include only items in the mapping matrix
-    XRPListFiltered = Table.SelectRows(XRPListWithType, each 
-        List.Contains(ValidHierarchyNames, [Hierarchy Name]) and 
-        List.Contains(ValidVSCs, [V_S_C])),
+    // Filter to include only items in the mapping matrix - only if we have mapping values
+    XRPListFiltered = if List.Count(HierarchyNameValues) > 0 and List.Count(VSCValues) > 0 then
+                        Table.SelectRows(XRPListWithType, each 
+                            List.Contains(HierarchyNameValues, [Hierarchy Name]) and 
+                            List.Contains(VSCValues, [V_S_C]))
+                     else
+                        XRPListWithType,
     
     // Add KEY column to List data - with explicit text conversion
     XRPListWithKey = Table.AddColumn(XRPListFiltered, "KEY", each Text.From([Hierarchy Name]) & " | " & Text.From([Value]), type text),
@@ -56,10 +75,13 @@ let
     // Step 6: Combine both XRP data sources
     CombinedXRP = Table.Combine({XRPTreeWithKey, XRPListWithKey}),
     
-    // Step 7: Filter SmartView data to include only items in the mapping matrix
-    SmartViewFiltered = Table.SelectRows(SmartViewData, each 
-        List.Contains(ValidHierarchyNames, [Hierarchy Name]) and 
-        List.Contains(ValidVSCs, [V_S_C])),
+    // Step 7: Filter SmartView data to include only items in the mapping matrix - only if we have mapping values
+    SmartViewFiltered = if List.Count(HierarchyNameValues) > 0 and List.Count(VSCValues) > 0 then
+                          Table.SelectRows(SmartViewData, each 
+                              List.Contains(HierarchyNameValues, [Hierarchy Name]) and 
+                              List.Contains(VSCValues, [V_S_C]))
+                       else
+                          SmartViewData,
     
     // Ensure SmartView data also has KEY column with proper text conversion
     SmartViewWithKey = if Table.HasColumns(SmartViewFiltered, "KEY") then
