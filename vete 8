@@ -7,58 +7,33 @@ let
     XRPListArray = Excel.CurrentWorkbook(){[Name="XRP_List_Array"]}[Content],
     
     // Step 3: Process Tree data
-    // Get header row and data rows
-    XRPTreeHeader = Table.FirstN(XRPTreeArray, 1),
-    XRPTreeDataRows = Table.Skip(XRPTreeArray, 1),
+    // Convert first row to headers
+    XRPTreeWithHeaders = Table.PromoteHeaders(XRPTreeArray, [PromoteAllScalars=true]),
     
-    // Find column indices for Tree data (adjust these indices based on your actual data)
-    TreeDimensionNameIndex = 0,  // Dimension_Name column index (Hierarchy Name for Tree data)
-    TreeValueIndex = 1,          // Value column index
-    TreeParentIndex = 2,         // Parent column index
-    TreeVSCIndex = 3,            // V_S_C column index
+    // Create a structured Tree table with proper column names
+    XRPTreeClean = Table.SelectColumns(XRPTreeWithHeaders, {"Dimension_Name", "Value", "Parent", "V_S_C"}),
     
-    // Create a structured Tree table
-    XRPTreeTable = Table.FromRecords(
-        List.Transform(
-            Table.ToRecords(XRPTreeDataRows),
-            each [
-                #"Hierarchy Name" = Record.Field(_, Text.From(TreeDimensionNameIndex)),
-                #"Value" = Record.Field(_, Text.From(TreeValueIndex)),
-                #"Parent" = Record.Field(_, Text.From(TreeParentIndex)),
-                #"V_S_C" = Record.Field(_, Text.From(TreeVSCIndex)),
-                #"Type" = "Tree"
-            ]
-        )
-    ),
+    // Rename and add type-specific columns
+    XRPTreeTable = Table.RenameColumns(XRPTreeClean, {{"Dimension_Name", "Hierarchy Name"}}),
+    XRPTreeWithType = Table.AddColumn(XRPTreeTable, "Type", each "Tree", type text),
     
     // Add KEY column to Tree data (Hierarchy Name | Value format)
-    XRPTreeWithKey = Table.AddColumn(XRPTreeTable, "KEY", each [Hierarchy Name] & " | " & [Value], type text),
+    XRPTreeWithKey = Table.AddColumn(XRPTreeWithType, "KEY", each [Hierarchy Name] & " | " & [Value], type text),
     
     // Step 4: Process List data
-    // Get header row and data rows
-    XRPListHeader = Table.FirstN(XRPListArray, 1),
-    XRPListDataRows = Table.Skip(XRPListArray, 1),
+    // Convert first row to headers
+    XRPListWithHeaders = Table.PromoteHeaders(XRPListArray, [PromoteAllScalars=true]),
     
-    // Find column indices for List data (adjust these indices based on your actual data)
-    ListValueIndex = 0,   // Value column index
-    ListVSCIndex = 1,     // V_S_C column index
+    // Create a structured List table
+    XRPListClean = Table.SelectColumns(XRPListWithHeaders, {"Value", "V_S_C"}),
     
-    // Create a structured List table - Use V_S_C as Hierarchy Name for List data
-    XRPListTable = Table.FromRecords(
-        List.Transform(
-            Table.ToRecords(XRPListDataRows),
-            each [
-                #"Value" = Record.Field(_, Text.From(ListValueIndex)),
-                #"V_S_C" = Record.Field(_, Text.From(ListVSCIndex)),
-                #"Hierarchy Name" = Record.Field(_, Text.From(ListVSCIndex)),  // For List, Hierarchy Name = V_S_C
-                #"Parent" = "",  // Empty parent for List type
-                #"Type" = "List"
-            ]
-        )
-    ),
+    // For List data, create Hierarchy Name from V_S_C and add empty Parent
+    XRPListWithHierarchy = Table.AddColumn(XRPListClean, "Hierarchy Name", each [V_S_C], type text),
+    XRPListWithParent = Table.AddColumn(XRPListWithHierarchy, "Parent", each "", type text),
+    XRPListWithType = Table.AddColumn(XRPListWithParent, "Type", each "List", type text),
     
     // Add KEY column to List data (Hierarchy Name | Value format)
-    XRPListWithKey = Table.AddColumn(XRPListTable, "KEY", each [Hierarchy Name] & " | " & [Value], type text),
+    XRPListWithKey = Table.AddColumn(XRPListWithType, "KEY", each [Hierarchy Name] & " | " & [Value], type text),
     
     // Step 5: Combine both XRP data sources
     CombinedXRP = Table.Combine({XRPTreeWithKey, XRPListWithKey}),
