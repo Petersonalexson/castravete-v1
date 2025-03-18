@@ -1,164 +1,887 @@
-let
-    // Step 1: Reference the existing SmartViewData query
-    SmartViewData = SmartViewData,
+Option Explicit
+
+' Data structures for comparison
+Private Type ComparisonItem
+    ItemType As String     ' "Tree" or "List"
+    VSC As String          ' Value_Set_Code
+    HierarchyName As String ' Tree_Name/Dimension_Name for Tree, or V_S_C for List
+    Value As String        ' Item value
+    SVParent As String     ' Parent in SmartView
+    XRPParent As String    ' Parent in XRP
+    Status As String       ' Match, Missing in XRP, Missing in SmartView, Different Parent
+    Key As String          ' Combined key for lookup: HierarchyName | Value
+End Type
+
+'==========================================================
+' RUN FULL COMPARISON PROCESS WITH PROGRESS LOG
+'==========================================================
+Public Sub RunFullComparisonProcess()
+    Dim wsReport As Worksheet
+    Dim wsProcessLog As Worksheet
+    Dim startTime As Date
+    Dim logRow As Long
     
-    // Step 2: Reference the XRP Tree and List arrays
-    XRPTreeArray = Excel.CurrentWorkbook(){[Name="XRP_Tree_Array"]}[Content],
-    XRPListArray = Excel.CurrentWorkbook(){[Name="XRP_List_Array"]}[Content],
+    ' Record start time
+    startTime = Now
     
-    // Step 3: Process Tree data
-    // Convert first row to headers
-    XRPTreeWithHeaders = Table.PromoteHeaders(XRPTreeArray, [PromoteAllScalars=true]),
+    ' Create or reset the process log sheet
+    On Error Resume Next
+    Set wsProcessLog = ThisWorkbook.Worksheets("ProcessLog4")
+    If wsProcessLog Is Nothing Then
+        Set wsProcessLog = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        wsProcessLog.Name = "ProcessLog4"
+        With wsProcessLog
+            .Range("A1").Value = "XRP vs SmartView Comparison Process Log"
+            .Range("A1").Font.Size = 14
+            .Range("A1").Font.Bold = True
+            .Range("A1:G1").Merge
+            .Range("A1:G1").HorizontalAlignment = xlCenter
+            .Range("A1:G1").Interior.Color = RGB(79, 129, 189)
+            .Range("A1:G1").Font.Color = RGB(255, 255, 255)
+            
+            .Range("A3").Value = "Timestamp"
+            .Range("B3").Value = "Step"
+            .Range("C3").Value = "Component"
+            .Range("D3").Value = "Action"
+            .Range("E3").Value = "Status"
+            .Range("F3").Value = "Details"
+            .Range("G3").Value = "Duration (s)"
+            .Range("A3:G3").Font.Bold = True
+            .Range("A3:G3").Interior.Color = RGB(217, 225, 242)
+        End With
+    Else
+        wsProcessLog.Range("A4:G" & wsProcessLog.Rows.Count).ClearContents
+        wsProcessLog.Range("A4:G" & wsProcessLog.Rows.Count).Interior.ColorIndex = xlNone
+    End If
+    On Error GoTo 0
     
-    // Create a structured Tree table with proper column names
-    XRPTreeClean = Table.SelectColumns(XRPTreeWithHeaders, {"Dimension_Name", "Value", "Parent", "V_S_C"}),
+    ' Initialize log row
+    logRow = 4
     
-    // Rename and add type-specific columns
-    XRPTreeTable = Table.RenameColumns(XRPTreeClean, {{"Dimension_Name", "Hierarchy Name"}}),
-    XRPTreeWithType = Table.AddColumn(XRPTreeTable, "Type", each "Tree", type text),
+    ' Start logging
+    LogProgress wsProcessLog, logRow, "Initialization", "System", "Starting process", "INFO", "Starting XRP vs SmartView comparison with full logic", 0
+    logRow = logRow + 1
     
-    // Add KEY column to Tree data - with explicit text conversion
-    XRPTreeWithKey = Table.AddColumn(XRPTreeWithType, "KEY", each Text.From([Hierarchy Name]) & " | " & Text.From([Value]), type text),
+    ' Create or reset the report sheet
+    On Error Resume Next
+    Set wsReport = ThisWorkbook.Worksheets("ComparisonReport")
+    If wsReport Is Nothing Then
+        LogProgress wsProcessLog, logRow, "Report Creation", "System", "Creating report sheet", "INFO", "Creating new ComparisonReport sheet", Timer - startTime
+        logRow = logRow + 1
+        
+        Set wsReport = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
+        wsReport.Name = "ComparisonReport"
+    Else
+        LogProgress wsProcessLog, logRow, "Report Creation", "System", "Clearing report sheet", "INFO", "Clearing existing ComparisonReport sheet", Timer - startTime
+        logRow = logRow + 1
+        
+        wsReport.Cells.Clear
+    End If
+    On Error GoTo 0
     
-    // Step 4: Process List data
-    // Convert first row to headers
-    XRPListWithHeaders = Table.PromoteHeaders(XRPListArray, [PromoteAllScalars=true]),
+    ' Verify XRP arrays exist
+    Dim XRPTreeArrayExists As Boolean
+    Dim XRPListArrayExists As Boolean
+    Dim SmartViewExists As Boolean
     
-    // Create a structured List table
-    XRPListClean = Table.SelectColumns(XRPListWithHeaders, {"Value", "V_S_C"}),
+    On Error Resume Next
+    XRPTreeArrayExists = Not IsEmpty(ThisWorkbook.Names("XRP_Tree_Array").RefersToRange)
+    XRPListArrayExists = Not IsEmpty(ThisWorkbook.Names("XRP_List_Array").RefersToRange)
     
-    // For List data, create Hierarchy Name from V_S_C and add empty Parent
-    XRPListWithHierarchy = Table.AddColumn(XRPListClean, "Hierarchy Name", each [V_S_C], type text),
-    XRPListWithParent = Table.AddColumn(XRPListWithHierarchy, "Parent", each "", type text),
-    XRPListWithType = Table.AddColumn(XRPListWithParent, "Type", each "List", type text),
+    ' Check if SmartView data exists
+    SmartViewExists = ThisWorkbook.Sheets("SmartView").Range("A1") <> ""
+    On Error GoTo 0
     
-    // Add KEY column to List data - with explicit text conversion
-    XRPListWithKey = Table.AddColumn(XRPListWithType, "KEY", each Text.From([Hierarchy Name]) & " | " & Text.From([Value]), type text),
+    ' Log data verification
+    If Not XRPTreeArrayExists Then
+        LogProgress wsProcessLog, logRow, "Data Verification", "XRP Tree", "Checking Tree data", "ERROR", "XRP_Tree_Array not found", Timer - startTime
+        logRow = logRow + 1
+        MsgBox "XRP_Tree_Array not found. Please run ImportXRPDataAsArrays first.", vbExclamation
+        Exit Sub
+    Else
+        LogProgress wsProcessLog, logRow, "Data Verification", "XRP Tree", "Checking Tree data", "SUCCESS", "XRP_Tree_Array found", Timer - startTime
+        logRow = logRow + 1
+    End If
     
-    // Step 5: Combine both XRP data sources
-    CombinedXRP = Table.Combine({XRPTreeWithKey, XRPListWithKey}),
+    If Not XRPListArrayExists Then
+        LogProgress wsProcessLog, logRow, "Data Verification", "XRP List", "Checking List data", "ERROR", "XRP_List_Array not found", Timer - startTime
+        logRow = logRow + 1
+        MsgBox "XRP_List_Array not found. Please run ImportXRPDataAsArrays first.", vbExclamation
+        Exit Sub
+    Else
+        LogProgress wsProcessLog, logRow, "Data Verification", "XRP List", "Checking List data", "SUCCESS", "XRP_List_Array found", Timer - startTime
+        logRow = logRow + 1
+    End If
     
-    // Step 6: Ensure SmartView data also has KEY column with proper text conversion
-    SmartViewWithKey = if Table.HasColumns(SmartViewData, "KEY") then
-                           SmartViewData
-                       else
-                           Table.AddColumn(SmartViewData, "KEY", each Text.From([Hierarchy Name]) & " | " & Text.From([Value]), type text),
+    If Not SmartViewExists Then
+        LogProgress wsProcessLog, logRow, "Data Verification", "SmartView", "Checking SmartView data", "ERROR", "SmartView data not found", Timer - startTime
+        logRow = logRow + 1
+        MsgBox "SmartView data not found. Please ensure SmartView sheet exists with data.", vbExclamation
+        Exit Sub
+    Else
+        LogProgress wsProcessLog, logRow, "Data Verification", "SmartView", "Checking SmartView data", "SUCCESS", "SmartView data found", Timer - startTime
+        logRow = logRow + 1
+    End If
     
-    // Step 7: Separate SmartView data by Type
-    SVTree = Table.SelectRows(SmartViewWithKey, each [Type] = "Tree"),
-    SVList = Table.SelectRows(SmartViewWithKey, each [Type] = "List"),
+    ' Process data and create the comparison
+    LogProgress wsProcessLog, logRow, "Comparison", "System", "Starting comparison process", "INFO", "Comparing XRP data with SmartView data", Timer - startTime
+    logRow = logRow + 1
     
-    // Step 8: Separate XRP data by Type
-    XRPTree = Table.SelectRows(CombinedXRP, each [Type] = "Tree"),
-    XRPList = Table.SelectRows(CombinedXRP, each [Type] = "List"),
+    ' Load data from arrays and SmartView into memory for comparison
+    LogProgress wsProcessLog, logRow, "Data Loading", "XRP Tree", "Loading Tree data", "INFO", "Loading XRP Tree data into memory", Timer - startTime
+    logRow = logRow + 1
     
-    // Step 9: Join Tree data using both V_S_C and KEY
-    SVTreeJoin = Table.NestedJoin(
-        SVTree,
-        {"V_S_C", "KEY"},
-        XRPTree,
-        {"V_S_C", "KEY"},
-        "XRPMatches",
-        JoinKind.LeftOuter
-    ),
+    ' Get XRP Tree and List data
+    Dim XRPTreeRange As Range
+    Dim XRPListRange As Range
+    Dim SmartViewRange As Range
     
-    // Use full record expansion to prevent parent issues
-    SVTreeWithXRP = Table.ExpandTableColumn(
-        SVTreeJoin,
-        "XRPMatches",
-        {"Parent"},
-        {"XRP_Parent"}
-    ),
+    Set XRPTreeRange = ThisWorkbook.Names("XRP_Tree_Array").RefersToRange
+    Set XRPListRange = ThisWorkbook.Names("XRP_List_Array").RefersToRange
     
-    // Step 10: Join List data using both V_S_C and KEY
-    SVListJoin = Table.NestedJoin(
-        SVList,
-        {"V_S_C", "KEY"},
-        XRPList,
-        {"V_S_C", "KEY"},
-        "XRPMatches",
-        JoinKind.LeftOuter
-    ),
+    ' Find SmartView data range
+    Dim wsSmartView As Worksheet
+    Set wsSmartView = ThisWorkbook.Sheets("SmartView")
+    Dim lastRow As Long, lastCol As Long
     
-    // Use full record expansion to prevent parent issues
-    SVListWithXRP = Table.ExpandTableColumn(
-        SVListJoin,
-        "XRPMatches",
-        {"Parent"},
-        {"XRP_Parent"}
-    ),
+    lastRow = wsSmartView.Cells(wsSmartView.Rows.Count, "A").End(xlUp).Row
+    lastCol = wsSmartView.Cells(1, wsSmartView.Columns.Count).End(xlToLeft).Column
     
-    // Step 11: Combine joined SmartView results
-    CombinedSVWithXRP = Table.Combine({SVTreeWithXRP, SVListWithXRP}),
+    Set SmartViewRange = wsSmartView.Range(wsSmartView.Cells(1, 1), wsSmartView.Cells(lastRow, lastCol))
     
-    // Step 12: Find XRP items not in SmartView (anti-join)
-    XRPTreeAnti = Table.NestedJoin(
-        XRPTree,
-        {"V_S_C", "KEY"},
-        SVTree,
-        {"V_S_C", "KEY"},
-        "SVMatches",
-        JoinKind.LeftAnti
-    ),
+    ' Perform the comparison
+    Dim results() As ComparisonItem
     
-    XRPTreeAntiCleaned = Table.RemoveColumns(XRPTreeAnti, {"SVMatches"}),
+    Call CompareData(XRPTreeRange, XRPListRange, SmartViewRange, results, wsProcessLog, logRow)
     
-    XRPListAnti = Table.NestedJoin(
-        XRPList,
-        {"V_S_C", "KEY"},
-        SVList,
-        {"V_S_C", "KEY"},
-        "SVMatches",
-        JoinKind.LeftAnti
-    ),
+    ' Create the report
+    LogProgress wsProcessLog, logRow, "Report Creation", "System", "Creating comparison report", "INFO", "Generating comparison report with results", Timer - startTime
+    logRow = logRow + 1
     
-    XRPListAntiCleaned = Table.RemoveColumns(XRPListAnti, {"SVMatches"}),
+    Call CreateComparisonReport(wsReport, results, wsProcessLog, logRow)
     
-    // Step 13: Combine XRP-only items
-    CombinedXRPOnly = Table.Combine({XRPTreeAntiCleaned, XRPListAntiCleaned}),
+    ' Format the process log
+    FormatProcessLog4 wsProcessLog
     
-    // Make sure Parent column is preserved - rename to be consistent
-    CombinedXRPOnlyWithRenamedParent = Table.RenameColumns(CombinedXRPOnly, {{"Parent", "XRP_Parent"}}),
+    ' Activate the report sheet
+    wsReport.Activate
+    wsReport.Range("A1").Select
     
-    // Step 14: Add placeholder SmartView columns to XRP-only data
-    XRPOnlyWithSVValue = Table.AddColumn(CombinedXRPOnlyWithRenamedParent, "SV_Value", each null, type text),
-    XRPOnlyWithSVParent = Table.AddColumn(XRPOnlyWithSVValue, "SV_Parent", each null, type text),
+    LogProgress wsProcessLog, logRow, "Completion", "System", "Process complete", "SUCCESS", "Comparison and report generation completed successfully", Timer - startTime
+    logRow = logRow + 1
     
-    // Step 15: Rename columns for consistency in the SmartView data
-    SVWithXRPRenamed = Table.RenameColumns(CombinedSVWithXRP, {
-        {"Value", "SV_Value"},
-        {"Parent", "SV_Parent"}
-    }),
+    ' Display completion message
+    MsgBox "The XRP vs SmartView comparison has been completed successfully!" & vbCrLf & vbCrLf & _
+           "Total processing time: " & Format(Now() - startTime, "hh:mm:ss") & vbCrLf & _
+           "Total records processed: " & UBound(results), vbInformation, "Comparison Complete"
+End Sub
+
+'==========================================================
+' COMPARE DATA FUNCTION - HANDLES THE ACTUAL COMPARISON LOGIC
+'==========================================================
+Private Sub CompareData(XRPTreeRange As Range, XRPListRange As Range, SmartViewRange As Range, ByRef results() As ComparisonItem, ByRef wsLog As Worksheet, ByRef logRow As Long)
+    Dim startTime As Date
+    startTime = Now
     
-    // Step 16: Combine all results
-    AllResults = Table.Combine({SVWithXRPRenamed, XRPOnlyWithSVParent}),
+    ' Get header rows
+    Dim XRPTreeHeaders As Variant
+    Dim XRPListHeaders As Variant
+    Dim SmartViewHeaders As Variant
     
-    // Step 17: Add Status column
-    WithStatus = Table.AddColumn(AllResults, "Status", each
-        if [SV_Value] = null then "Missing in SmartView"
-        else if [XRP_Parent] = null then "Missing in XRP"
-        else if [Type] = "Tree" and [SV_Parent] <> [XRP_Parent] then "Different Parent"
-        else "Match",
-        type text
-    ),
+    XRPTreeHeaders = XRPTreeRange.Rows(1).Value
+    XRPListHeaders = XRPListRange.Rows(1).Value
+    SmartViewHeaders = SmartViewRange.Rows(1).Value
     
-    // Step 18: Select and rename final columns
-    FinalColumns = Table.SelectColumns(WithStatus, {
-        "Type", "V_S_C", "Hierarchy Name", "SV_Value", "SV_Parent", "XRP_Parent", "Status"
-    }),
+    ' Find column indices
+    Dim treeNameCol As Integer, treeValueCol As Integer, treeParentCol As Integer, treeVSCCol As Integer
+    Dim listValueCol As Integer, listVSCCol As Integer
+    Dim svTypeCol As Integer, svVSCCol As Integer, svHNCol As Integer, svValueCol As Integer, svParentCol As Integer
     
-    FinalRenamed = Table.RenameColumns(FinalColumns, {
-        {"SV_Value", "Value"},
-        {"SV_Parent", "SmartView Parent"},
-        {"XRP_Parent", "XRP Parent"}
-    }),
+    ' Find XRP Tree columns
+    treeNameCol = GetColumnIndex(XRPTreeHeaders, "Dimension_Name")
+    treeValueCol = GetColumnIndex(XRPTreeHeaders, "Value")
+    treeParentCol = GetColumnIndex(XRPTreeHeaders, "Parent")
+    treeVSCCol = GetColumnIndex(XRPTreeHeaders, "V_S_C")
     
-    // Step 19: Sort results
-    SortedResults = Table.Sort(FinalRenamed, {
-        {"Type", Order.Ascending},
-        {"V_S_C", Order.Ascending},
-        {"Hierarchy Name", Order.Ascending},
-        {"Status", Order.Ascending}
-    })
-in
-    SortedResults
+    ' Find XRP List columns
+    listValueCol = GetColumnIndex(XRPListHeaders, "Value")
+    listVSCCol = GetColumnIndex(XRPListHeaders, "V_S_C")
+    
+    ' Find SmartView columns
+    svTypeCol = GetColumnIndex(SmartViewHeaders, "Type")
+    svVSCCol = GetColumnIndex(SmartViewHeaders, "V_S_C")
+    svHNCol = GetColumnIndex(SmartViewHeaders, "Hierarchy Name")
+    svValueCol = GetColumnIndex(SmartViewHeaders, "Value")
+    svParentCol = GetColumnIndex(SmartViewHeaders, "Parent")
+    
+    ' Log column finding
+    LogProgress wsLog, logRow, "Data Preparation", "Columns", "Finding column indices", "INFO", "Found Tree columns: Name=" & treeNameCol & ", Value=" & treeValueCol & ", Parent=" & treeParentCol & ", VSC=" & treeVSCCol, Timer - startTime
+    logRow = logRow + 1
+    
+    LogProgress wsLog, logRow, "Data Preparation", "Columns", "Finding column indices", "INFO", "Found List columns: Value=" & listValueCol & ", VSC=" & listVSCCol, Timer - startTime
+    logRow = logRow + 1
+    
+    LogProgress wsLog, logRow, "Data Preparation", "Columns", "Finding column indices", "INFO", "Found SmartView columns: Type=" & svTypeCol & ", VSC=" & svVSCCol & ", HN=" & svHNCol & ", Value=" & svValueCol & ", Parent=" & svParentCol, Timer - startTime
+    logRow = logRow + 1
+    
+    ' Get data from the ranges
+    Dim XRPTreeData As Variant
+    Dim XRPListData As Variant
+    Dim SmartViewData As Variant
+    
+    XRPTreeData = XRPTreeRange.Value
+    XRPListData = XRPListRange.Value
+    SmartViewData = SmartViewRange.Value
+    
+    ' Create dictionaries for XRP Tree and List data
+    Dim XRPTreeDict As Object
+    Dim XRPListDict As Object
+    Set XRPTreeDict = CreateObject("Scripting.Dictionary")
+    Set XRPListDict = CreateObject("Scripting.Dictionary")
+    
+    ' Load XRP Tree data into dictionary
+    Dim i As Long, key As String
+    For i = 2 To UBound(XRPTreeData, 1)  ' Start from row 2 (skip header)
+        ' Create key as "Hierarchy Name | Value"
+        key = Trim(CStr(XRPTreeData(i, treeNameCol))) & " | " & Trim(CStr(XRPTreeData(i, treeValueCol)))
+        
+        ' Add to dictionary with VSC and Parent
+        If Not XRPTreeDict.Exists(key) Then
+            XRPTreeDict.Add key, Array(Trim(CStr(XRPTreeData(i, treeVSCCol))), Trim(CStr(XRPTreeData(i, treeParentCol))))
+        End If
+    Next i
+    
+    LogProgress wsLog, logRow, "Data Preparation", "XRP Tree", "Loading Tree dictionary", "INFO", "Loaded " & XRPTreeDict.Count & " Tree items into dictionary", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Load XRP List data into dictionary
+    For i = 2 To UBound(XRPListData, 1)  ' Start from row 2 (skip header)
+        ' For List, Hierarchy Name = V_S_C
+        key = Trim(CStr(XRPListData(i, listVSCCol))) & " | " & Trim(CStr(XRPListData(i, listValueCol)))
+        
+        ' Add to dictionary with VSC (parent is always blank for List)
+        If Not XRPListDict.Exists(key) Then
+            XRPListDict.Add key, Array(Trim(CStr(XRPListData(i, listVSCCol))), "")
+        End If
+    Next i
+    
+    LogProgress wsLog, logRow, "Data Preparation", "XRP List", "Loading List dictionary", "INFO", "Loaded " & XRPListDict.Count & " List items into dictionary", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Create dictionary for SmartView data
+    Dim SVDict As Object
+    Set SVDict = CreateObject("Scripting.Dictionary")
+    
+    ' Load SmartView data into dictionary
+    For i = 2 To UBound(SmartViewData, 1)  ' Start from row 2 (skip header)
+        key = Trim(CStr(SmartViewData(i, svHNCol))) & " | " & Trim(CStr(SmartViewData(i, svValueCol)))
+        
+        ' Add to dictionary with type, VSC and Parent
+        If Not SVDict.Exists(key) Then
+            SVDict.Add key, Array(Trim(CStr(SmartViewData(i, svTypeCol))), Trim(CStr(SmartViewData(i, svVSCCol))), Trim(CStr(SmartViewData(i, svParentCol))))
+        End If
+    Next i
+    
+    LogProgress wsLog, logRow, "Data Preparation", "SmartView", "Loading SmartView dictionary", "INFO", "Loaded " & SVDict.Count & " SmartView items into dictionary", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Initialize results array
+    Dim resultCount As Long
+    resultCount = 0
+    ReDim results(1 To 10000) As ComparisonItem  ' Pre-allocate array (will resize later)
+    
+    ' First, process SmartView items
+    LogProgress wsLog, logRow, "Comparison", "SmartView", "Processing SmartView items", "INFO", "Comparing SmartView items with XRP data", Timer - startTime
+    logRow = logRow + 1
+    
+    Dim svKey As Variant
+    Dim matchCount As Long, missingCount As Long, diffParentCount As Long
+    matchCount = 0
+    missingCount = 0
+    diffParentCount = 0
+    
+    For Each svKey In SVDict.Keys
+        Dim svData As Variant
+        svData = SVDict(svKey)
+        
+        ' Split key to get parts
+        Dim keyParts As Variant
+        keyParts = Split(svKey, " | ")
+        
+        ' Check if item exists in appropriate XRP dictionary
+        If svData(0) = "Tree" Then
+            ' Tree item - check in XRP Tree dictionary
+            If XRPTreeDict.Exists(svKey) Then
+                ' Item exists in XRP Tree
+                Dim xrpTreeData As Variant
+                xrpTreeData = XRPTreeDict(svKey)
+                
+                ' Check if parents match
+                If svData(2) = xrpTreeData(1) Then
+                    ' Parents match - item is identical
+                    resultCount = resultCount + 1
+                    results(resultCount).ItemType = "Tree"
+                    results(resultCount).VSC = xrpTreeData(0)
+                    results(resultCount).HierarchyName = keyParts(0)
+                    results(resultCount).Value = keyParts(1)
+                    results(resultCount).SVParent = svData(2)
+                    results(resultCount).XRPParent = xrpTreeData(1)
+                    results(resultCount).Status = "Match"
+                    results(resultCount).Key = svKey
+                    matchCount = matchCount + 1
+                Else
+                    ' Parents differ
+                    resultCount = resultCount + 1
+                    results(resultCount).ItemType = "Tree"
+                    results(resultCount).VSC = xrpTreeData(0)
+                    results(resultCount).HierarchyName = keyParts(0)
+                    results(resultCount).Value = keyParts(1)
+                    results(resultCount).SVParent = svData(2)
+                    results(resultCount).XRPParent = xrpTreeData(1)
+                    results(resultCount).Status = "Different Parent"
+                    results(resultCount).Key = svKey
+                    diffParentCount = diffParentCount + 1
+                End If
+            Else
+                ' Item missing from XRP Tree
+                resultCount = resultCount + 1
+                results(resultCount).ItemType = "Tree"
+                results(resultCount).VSC = svData(1)
+                results(resultCount).HierarchyName = keyParts(0)
+                results(resultCount).Value = keyParts(1)
+                results(resultCount).SVParent = svData(2)
+                results(resultCount).XRPParent = ""
+                results(resultCount).Status = "Missing in XRP"
+                results(resultCount).Key = svKey
+                missingCount = missingCount + 1
+            End If
+        Else
+            ' List item - check in XRP List dictionary
+            If XRPListDict.Exists(svKey) Then
+                ' Item exists in XRP List
+                Dim xrpListData As Variant
+                xrpListData = XRPListDict(svKey)
+                
+                ' For List items, we don't check parents (always blank)
+                resultCount = resultCount + 1
+                results(resultCount).ItemType = "List"
+                results(resultCount).VSC = xrpListData(0)
+                results(resultCount).HierarchyName = keyParts(0)
+                results(resultCount).Value = keyParts(1)
+                results(resultCount).SVParent = svData(2)
+                results(resultCount).XRPParent = "" ' List items have no parent
+                results(resultCount).Status = "Match"
+                results(resultCount).Key = svKey
+                matchCount = matchCount + 1
+            Else
+                ' Item missing from XRP List
+                resultCount = resultCount + 1
+                results(resultCount).ItemType = "List"
+                results(resultCount).VSC = svData(1)
+                results(resultCount).HierarchyName = keyParts(0)
+                results(resultCount).Value = keyParts(1)
+                results(resultCount).SVParent = svData(2)
+                results(resultCount).XRPParent = ""
+                results(resultCount).Status = "Missing in XRP"
+                results(resultCount).Key = svKey
+                missingCount = missingCount + 1
+            End If
+        End If
+        
+        ' Remove the item from the XRP dictionary to mark it as processed
+        If svData(0) = "Tree" Then
+            If XRPTreeDict.Exists(svKey) Then XRPTreeDict.Remove svKey
+        Else
+            If XRPListDict.Exists(svKey) Then XRPListDict.Remove svKey
+        End If
+    Next svKey
+    
+    LogProgress wsLog, logRow, "Comparison", "SmartView", "Completed SmartView processing", "INFO", "Found " & matchCount & " matches, " & missingCount & " missing, " & diffParentCount & " different parent", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Now process remaining XRP Tree items (those missing from SmartView)
+    LogProgress wsLog, logRow, "Comparison", "XRP Tree", "Processing XRP Tree", "INFO", "Finding Tree items missing from SmartView", Timer - startTime
+    logRow = logRow + 1
+    
+    Dim missingInSVCount As Long
+    missingInSVCount = 0
+    
+    Dim xrpTreeKey As Variant
+    For Each xrpTreeKey In XRPTreeDict.Keys
+        ' This item exists in XRP Tree but not in SmartView
+        Dim xrpTreeItem As Variant
+        xrpTreeItem = XRPTreeDict(xrpTreeKey)
+        
+        keyParts = Split(xrpTreeKey, " | ")
+        
+        resultCount = resultCount + 1
+        results(resultCount).ItemType = "Tree"
+        results(resultCount).VSC = xrpTreeItem(0)
+        results(resultCount).HierarchyName = keyParts(0)
+        results(resultCount).Value = keyParts(1)
+        results(resultCount).SVParent = ""
+        results(resultCount).XRPParent = xrpTreeItem(1)
+        results(resultCount).Status = "Missing in SmartView"
+        results(resultCount).Key = xrpTreeKey
+        missingInSVCount = missingInSVCount + 1
+    Next xrpTreeKey
+    
+    LogProgress wsLog, logRow, "Comparison", "XRP Tree", "Completed XRP Tree processing", "INFO", "Found " & XRPTreeDict.Count & " Tree items missing from SmartView", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Now process remaining XRP List items (those missing from SmartView)
+    LogProgress wsLog, logRow, "Comparison", "XRP List", "Processing XRP List", "INFO", "Finding List items missing from SmartView", Timer - startTime
+    logRow = logRow + 1
+    
+    Dim xrpListKey As Variant
+    For Each xrpListKey In XRPListDict.Keys
+        ' This item exists in XRP List but not in SmartView
+        Dim xrpListItem As Variant
+        xrpListItem = XRPListDict(xrpListKey)
+        
+        keyParts = Split(xrpListKey, " | ")
+        
+        resultCount = resultCount + 1
+        results(resultCount).ItemType = "List"
+        results(resultCount).VSC = xrpListItem(0)
+        results(resultCount).HierarchyName = keyParts(0)
+        results(resultCount).Value = keyParts(1)
+        results(resultCount).SVParent = ""
+        results(resultCount).XRPParent = "" ' List items have no parent
+        results(resultCount).Status = "Missing in SmartView"
+        results(resultCount).Key = xrpListKey
+        missingInSVCount = missingInSVCount + 1
+    Next xrpListKey
+    
+    LogProgress wsLog, logRow, "Comparison", "XRP List", "Completed XRP List processing", "INFO", "Found " & XRPListDict.Count & " List items missing from SmartView", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Resize the results array to the actual number of items
+    ReDim Preserve results(1 To resultCount) As ComparisonItem
+    
+    ' Log summary
+    LogProgress wsLog, logRow, "Comparison", "Summary", "Completed comparison", "SUCCESS", "Total items: " & resultCount & " (Match: " & matchCount & ", Missing in XRP: " & missingCount & ", Missing in SmartView: " & missingInSVCount & ", Different Parent: " & diffParentCount & ")", Timer - startTime
+    logRow = logRow + 1
+End Sub
+
+'==========================================================
+' CREATE COMPARISON REPORT
+'==========================================================
+Private Sub CreateComparisonReport(wsReport As Worksheet, results() As ComparisonItem, ByRef wsLog As Worksheet, ByRef logRow As Long)
+    Dim startTime As Date
+    startTime = Now
+    
+    ' Format the sheet title
+    With wsReport
+        .Range("A1").Value = "SmartView vs. XRP Comparison Report"
+        .Range("A1").Font.Size = 16
+        .Range("A1").Font.Bold = True
+        .Range("A1:G1").Merge
+        .Range("A1:G1").HorizontalAlignment = xlCenter
+        .Range("A1:G1").Interior.Color = RGB(79, 129, 189)
+        .Range("A1:G1").Font.Color = RGB(255, 255, 255)
+        
+        .Range("A2").Value = "Generated: " & Format(Now(), "yyyy-mm-dd hh:mm:ss")
+        .Range("A2:G2").Merge
+        .Range("A2:G2").HorizontalAlignment = xlCenter
+        .Range("A2:G2").Interior.Color = RGB(219, 229, 241)
+    End With
+    
+    LogProgress wsLog, logRow, "Report Formatting", "System", "Creating report headers", "INFO", "Formatted report title and header", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Create the header row
+    With wsReport
+        .Range("A4").Value = "Type"
+        .Range("B4").Value = "V_S_C"
+        .Range("C4").Value = "Hierarchy Name"
+        .Range("D4").Value = "Value"
+        .Range("E4").Value = "SmartView Parent"
+        .Range("F4").Value = "XRP Parent"
+        .Range("G4").Value = "Status"
+        .Range("A4:G4").Font.Bold = True
+        .Range("A4:G4").Interior.Color = RGB(217, 225, 242)
+    End With
+    
+    ' Write data to the report
+    Dim i As Long
+    For i = LBound(results) To UBound(results)
+        With wsReport
+            .Cells(i + 4, 1).Value = results(i).ItemType
+            .Cells(i + 4, 2).Value = results(i).VSC
+            .Cells(i + 4, 3).Value = results(i).HierarchyName
+            .Cells(i + 4, 4).Value = results(i).Value
+            .Cells(i + 4, 5).Value = results(i).SVParent
+            .Cells(i + 4, 6).Value = results(i).XRPParent
+            .Cells(i + 4, 7).Value = results(i).Status
+        End With
+    Next i
+    
+    LogProgress wsLog, logRow, "Report Creation", "Data", "Writing data", "INFO", "Wrote " & UBound(results) & " comparison results to report", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Create a table for the data
+    Dim dataRange As Range
+    Set dataRange = wsReport.Range("A4:G" & (UBound(results) + 4))
+    
+    Dim tbl As ListObject
+    Set tbl = wsReport.ListObjects.Add(xlSrcRange, dataRange, , xlYes)
+    tbl.Name = "ComparisonTable"
+    tbl.TableStyle = "TableStyleMedium2"
+    
+    LogProgress wsLog, logRow, "Report Formatting", "Table", "Creating data table", "INFO", "Created formatted table for comparison data", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Apply conditional formatting to Status column
+    With wsReport.Range("G5:G" & (UBound(results) + 4))
+        .FormatConditions.Delete
+        ' Match status - Green
+        .FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""Match"""
+        .FormatConditions(1).Interior.Color = RGB(198, 239, 206)
+        
+        ' Missing in XRP - Red
+        .FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""Missing in XRP"""
+        .FormatConditions(2).Interior.Color = RGB(255, 199, 206)
+        
+        ' Missing in SmartView - Yellow
+        .FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""Missing in SmartView"""
+        .FormatConditions(3).Interior.Color = RGB(255, 235, 156)
+        
+        ' Different Parent - Blue
+        .FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""Different Parent"""
+        .FormatConditions(4).Interior.Color = RGB(197, 217, 241)
+    End With
+    
+    LogProgress wsLog, logRow, "Report Formatting", "Styling", "Applying conditional formatting", "INFO", "Added color coding for status values", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Add a status summary table below the main data
+    Dim lastRow As Long
+    lastRow = UBound(results) + 4
+    
+    Dim summaryStartRow As Long
+    summaryStartRow = lastRow + 3
+    
+    With wsReport
+        .Range("A" & summaryStartRow & ":G" & summaryStartRow).HorizontalAlignment = xlCenter
+        .Range("A" & summaryStartRow & ":G" & summaryStartRow).Interior.Color = RGB(79, 129, 189)
+        .Range("A" & summaryStartRow & ":G" & summaryStartRow).Font.Color = RGB(255, 255, 255)
+        
+        .Range("A" & (summaryStartRow + 2)).Value = "Status"
+        .Range("B" & (summaryStartRow + 2)).Value = "Count"
+        .Range("C" & (summaryStartRow + 2)).Value = "Percentage"
+        .Range("D" & (summaryStartRow + 2)).Value = "Visual"
+        .Range("A" & (summaryStartRow + 2) & ":D" & (summaryStartRow + 2)).Font.Bold = True
+        .Range("A" & (summaryStartRow + 2) & ":D" & (summaryStartRow + 2)).Interior.Color = RGB(217, 225, 242)
+        
+        ' Add status rows with COUNTIF formulas
+        .Range("A" & (summaryStartRow + 3)).Value = "Match"
+        .Range("B" & (summaryStartRow + 3)).Formula = "=COUNTIFS(ComparisonTable[Status],""Match"")"
+        .Range("C" & (summaryStartRow + 3)).Formula = "=IF(COUNTA(ComparisonTable[Status])>0,B" & (summaryStartRow + 3) & "/COUNTA(ComparisonTable[Status]),0)"
+        .Range("C" & (summaryStartRow + 3)).NumberFormat = "0.0%"
+        .Range("A" & (summaryStartRow + 3) & ":C" & (summaryStartRow + 3)).Interior.Color = RGB(198, 239, 206)
+        
+        ' Add data bar for visual representation
+        .Range("D" & (summaryStartRow + 3)).Formula = "=REPT(""■"", ROUND(C" & (summaryStartRow + 3) & "*100,0))"
+        .Range("D" & (summaryStartRow + 3)).Font.Color = RGB(0, 176, 80)
+        
+        .Range("A" & (summaryStartRow + 4)).Value = "Missing in XRP"
+        .Range("B" & (summaryStartRow + 4)).Formula = "=COUNTIFS(ComparisonTable[Status],""Missing in XRP"")"
+        .Range("C" & (summaryStartRow + 4)).Formula = "=IF(COUNTA(ComparisonTable[Status])>0,B" & (summaryStartRow + 4) & "/COUNTA(ComparisonTable[Status]),0)"
+        .Range("C" & (summaryStartRow + 4)).NumberFormat = "0.0%"
+        .Range("A" & (summaryStartRow + 4) & ":C" & (summaryStartRow + 4)).Interior.Color = RGB(255, 199, 206)
+        
+        ' Add data bar for visual representation
+        .Range("D" & (summaryStartRow + 4)).Formula = "=REPT(""■"", ROUND(C" & (summaryStartRow + 4) & "*100,0))"
+        .Range("D" & (summaryStartRow + 4)).Font.Color = RGB(255, 0, 0)
+        
+        .Range("A" & (summaryStartRow + 5)).Value = "Missing in SmartView"
+        .Range("B" & (summaryStartRow + 5)).Formula = "=COUNTIFS(ComparisonTable[Status],""Missing in SmartView"")"
+        .Range("C" & (summaryStartRow + 5)).Formula = "=IF(COUNTA(ComparisonTable[Status])>0,B" & (summaryStartRow + 5) & "/COUNTA(ComparisonTable[Status]),0)"
+        .Range("C" & (summaryStartRow + 5)).NumberFormat = "0.0%"
+        .Range("A" & (summaryStartRow + 5) & ":C" & (summaryStartRow + 5)).Interior.Color = RGB(255, 235, 156)
+        
+        ' Add data bar for visual representation
+        .Range("D" & (summaryStartRow + 5)).Formula = "=REPT(""■"", ROUND(C" & (summaryStartRow + 5) & "*100,0))"
+        .Range("D" & (summaryStartRow + 5)).Font.Color = RGB(255, 192, 0)
+        
+        .Range("A" & (summaryStartRow + 6)).Value = "Different Parent"
+        .Range("B" & (summaryStartRow + 6)).Formula = "=COUNTIFS(ComparisonTable[Status],""Different Parent"")"
+        .Range("C" & (summaryStartRow + 6)).Formula = "=IF(COUNTA(ComparisonTable[Status])>0,B" & (summaryStartRow + 6) & "/COUNTA(ComparisonTable[Status]),0)"
+        .Range("C" & (summaryStartRow + 6)).NumberFormat = "0.0%"
+        .Range("A" & (summaryStartRow + 6) & ":C" & (summaryStartRow + 6)).Interior.Color = RGB(197, 217, 241)
+        
+        ' Add data bar for visual representation
+        .Range("D" & (summaryStartRow + 6)).Formula = "=REPT(""■"", ROUND(C" & (summaryStartRow + 6) & "*100,0))"
+        .Range("D" & (summaryStartRow + 6)).Font.Color = RGB(0, 112, 192)
+        
+        .Range("A" & (summaryStartRow + 7)).Value = "Total"
+        .Range("B" & (summaryStartRow + 7)).Formula = "=SUM(B" & (summaryStartRow + 3) & ":B" & (summaryStartRow + 6) & ")"
+        .Range("C" & (summaryStartRow + 7)).Formula = "=SUM(C" & (summaryStartRow + 3) & ":C" & (summaryStartRow + 6) & ")"
+        .Range("C" & (summaryStartRow + 7)).NumberFormat = "0.0%"
+        .Range("A" & (summaryStartRow + 7) & ":C" & (summaryStartRow + 7)).Font.Bold = True
+        .Range("A" & (summaryStartRow + 7) & ":D" & (summaryStartRow + 7)).Borders(xlEdgeTop).LineStyle = xlContinuous
+        .Range("A" & (summaryStartRow + 7) & ":D" & (summaryStartRow + 7)).Borders(xlEdgeBottom).LineStyle = xlDouble
+    End With
+    
+    LogProgress wsLog, logRow, "Report Formatting", "Summary", "Creating summary table", "INFO", "Added summary statistics with visualizations", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Add type summary table
+    Dim typeSummaryRow As Long
+    typeSummaryRow = summaryStartRow + 10
+    
+    With wsReport
+        .Range("A" & typeSummaryRow).Value = "Distribution by Type"
+        .Range("A" & typeSummaryRow).Font.Bold = True
+        .Range("A" & typeSummaryRow).Font.Size = 14
+        .Range("A" & typeSummaryRow & ":G" & typeSummaryRow).Merge
+        .Range("A" & typeSummaryRow & ":G" & typeSummaryRow).HorizontalAlignment = xlCenter
+        .Range("A" & typeSummaryRow & ":G" & typeSummaryRow).Interior.Color = RGB(79, 129, 189)
+        .Range("A" & typeSummaryRow & ":G" & typeSummaryRow).Font.Color = RGB(255, 255, 255)
+        
+        .Range("A" & (typeSummaryRow + 2)).Value = "Type"
+        .Range("B" & (typeSummaryRow + 2)).Value = "Count"
+        .Range("C" & (typeSummaryRow + 2)).Value = "Percentage"
+        .Range("D" & (typeSummaryRow + 2)).Value = "Visual"
+        .Range("A" & (typeSummaryRow + 2) & ":D" & (typeSummaryRow + 2)).Font.Bold = True
+        .Range("A" & (typeSummaryRow + 2) & ":D" & (typeSummaryRow + 2)).Interior.Color = RGB(217, 225, 242)
+        
+        ' Add type rows with COUNTIF formulas
+        .Range("A" & (typeSummaryRow + 3)).Value = "Tree"
+        .Range("B" & (typeSummaryRow + 3)).Formula = "=COUNTIFS(ComparisonTable[Type],""Tree"")"
+        .Range("C" & (typeSummaryRow + 3)).Formula = "=IF(COUNTA(ComparisonTable[Type])>0,B" & (typeSummaryRow + 3) & "/COUNTA(ComparisonTable[Type]),0)"
+        .Range("C" & (typeSummaryRow + 3)).NumberFormat = "0.0%"
+        .Range("A" & (typeSummaryRow + 3) & ":C" & (typeSummaryRow + 3)).Interior.Color = RGB(222, 235, 247)
+        
+        ' Add data bar for visual representation
+        .Range("D" & (typeSummaryRow + 3)).Formula = "=REPT(""■"", ROUND(C" & (typeSummaryRow + 3) & "*100,0))"
+        .Range("D" & (typeSummaryRow + 3)).Font.Color = RGB(0, 112, 192)
+        
+        .Range("A" & (typeSummaryRow + 4)).Value = "List"
+        .Range("B" & (typeSummaryRow + 4)).Formula = "=COUNTIFS(ComparisonTable[Type],""List"")"
+        .Range("C" & (typeSummaryRow + 4)).Formula = "=IF(COUNTA(ComparisonTable[Type])>0,B" & (typeSummaryRow + 4) & "/COUNTA(ComparisonTable[Type]),0)"
+        .Range("C" & (typeSummaryRow + 4)).NumberFormat = "0.0%"
+        .Range("A" & (typeSummaryRow + 4) & ":C" & (typeSummaryRow + 4)).Interior.Color = RGB(226, 239, 218)
+        
+        ' Add data bar for visual representation
+        .Range("D" & (typeSummaryRow + 4)).Formula = "=REPT(""■"", ROUND(C" & (typeSummaryRow + 4) & "*100,0))"
+        .Range("D" & (typeSummaryRow + 4)).Font.Color = RGB(0, 176, 80)
+        
+        .Range("A" & (typeSummaryRow + 5)).Value = "Total"
+        .Range("B" & (typeSummaryRow + 5)).Formula = "=SUM(B" & (typeSummaryRow + 3) & ":B" & (typeSummaryRow + 4) & ")"
+        .Range("C" & (typeSummaryRow + 5)).Formula = "=SUM(C" & (typeSummaryRow + 3) & ":C" & (typeSummaryRow + 4) & ")"
+        .Range("C" & (typeSummaryRow + 5)).NumberFormat = "0.0%"
+        .Range("A" & (typeSummaryRow + 5) & ":C" & (typeSummaryRow + 5)).Font.Bold = True
+        .Range("A" & (typeSummaryRow + 5) & ":D" & (typeSummaryRow + 5)).Borders(xlEdgeTop).LineStyle = xlContinuous
+        .Range("A" & (typeSummaryRow + 5) & ":D" & (typeSummaryRow + 5)).Borders(xlEdgeBottom).LineStyle = xlDouble
+    End With
+    
+    LogProgress wsLog, logRow, "Report Formatting", "Type Summary", "Creating type distribution", "INFO", "Added type distribution statistics", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Add a legend
+    Dim legendStartRow As Long
+    legendStartRow = typeSummaryRow + 8
+    
+    With wsReport
+        .Range("A" & legendStartRow).Value = "Legend & Explanations"
+        .Range("A" & legendStartRow).Font.Bold = True
+        .Range("A" & legendStartRow).Font.Size = 14
+        .Range("A" & legendStartRow & ":G" & legendStartRow).Merge
+        .Range("A" & legendStartRow & ":G" & legendStartRow).HorizontalAlignment = xlCenter
+        .Range("A" & legendStartRow & ":G" & legendStartRow).Interior.Color = RGB(79, 129, 189)
+        .Range("A" & legendStartRow & ":G" & legendStartRow).Font.Color = RGB(255, 255, 255)
+        
+        .Range("A" & (legendStartRow + 2)).Value = "Status"
+        .Range("B" & (legendStartRow + 2)).Value = "Description"
+        .Range("A" & (legendStartRow + 2) & ":B" & (legendStartRow + 2)).Font.Bold = True
+        .Range("A" & (legendStartRow + 2) & ":B" & (legendStartRow + 2)).Interior.Color = RGB(217, 225, 242)
+        
+        .Range("A" & (legendStartRow + 3)).Value = "Match"
+        .Range("B" & (legendStartRow + 3)).Value = "Identical item with same parent in both systems"
+        .Range("A" & (legendStartRow + 3)).Interior.Color = RGB(198, 239, 206)
+        
+        .Range("A" & (legendStartRow + 4)).Value = "Missing in XRP"
+        .Range("B" & (legendStartRow + 4)).Value = "Item exists in SmartView but not in XRP file"
+        .Range("A" & (legendStartRow + 4)).Interior.Color = RGB(255, 199, 206)
+        
+        .Range("A" & (legendStartRow + 5)).Value = "Missing in SmartView"
+        .Range("B" & (legendStartRow + 5)).Value = "Item exists in XRP file but not in SmartView"
+        .Range("A" & (legendStartRow + 5)).Interior.Color = RGB(255, 235, 156)
+        
+        .Range("A" & (legendStartRow + 6)).Value = "Different Parent"
+        .Range("B" & (legendStartRow + 6)).Value = "Item exists in both systems but has different Parent (Tree type only)"
+        .Range("A" & (legendStartRow + 6)).Interior.Color = RGB(197, 217, 241)
+        
+        .Range("B" & (legendStartRow + 3) & ":B" & (legendStartRow + 6)).WrapText = True
+        .Columns("B:B").ColumnWidth = 50
+        
+        ' Add report metadata
+        .Range("D" & (legendStartRow + 2)).Value = "Report Metadata"
+        .Range("D" & (legendStartRow + 2) & ":G" & (legendStartRow + 2)).Font.Bold = True
+        .Range("D" & (legendStartRow + 2) & ":G" & (legendStartRow + 2)).Interior.Color = RGB(217, 225, 242)
+        .Range("D" & (legendStartRow + 2) & ":G" & (legendStartRow + 2)).Merge
+        
+        .Range("D" & (legendStartRow + 3)).Value = "Generated By:"
+        .Range("E" & (legendStartRow + 3)).Value = Application.UserName
+        .Range("D" & (legendStartRow + 4)).Value = "Generation Date:"
+        .Range("E" & (legendStartRow + 4)).Value = Format(Now(), "yyyy-mm-dd")
+        .Range("D" & (legendStartRow + 5)).Value = "Generation Time:"
+        .Range("E" & (legendStartRow + 5)).Value = Format(Now(), "hh:mm:ss")
+        .Range("D" & (legendStartRow + 6)).Value = "Process Duration:"
+        .Range("E" & (legendStartRow + 6)).Value = Format(Now() - startTime, "hh:mm:ss")
+        
+        .Range("D" & (legendStartRow + 3) & ":D" & (legendStartRow + 6)).Font.Bold = True
+    End With
+    
+    LogProgress wsLog, logRow, "Report Formatting", "Legend", "Adding legend", "INFO", "Added status legend and metadata", Timer - startTime
+    logRow = logRow + 1
+    
+    ' Add filter button to table
+    tbl.ShowAutoFilterDropDown = True
+    
+    ' Autofit columns
+    wsReport.Columns("A:G").AutoFit
+    
+    ' Freeze panes for easy navigation
+    wsReport.Range("A5").Select
+    ActiveWindow.FreezePanes = True
+    
+    LogProgress wsLog, logRow, "Report Formatting", "Final", "Finalizing report", "SUCCESS", "Completed report formatting with " & UBound(results) & " items", Timer - startTime
+    logRow = logRow + 1
+End Sub
+
+'==========================================================
+' FORMAT PROCESS LOG 4
+'==========================================================
+Private Sub FormatProcessLog4(wsLog As Worksheet)
+    ' Format the process log with enhanced formatting
+    
+    ' Get last row
+    Dim lastRow As Long
+    lastRow = wsLog.Cells(wsLog.Rows.Count, "A").End(xlUp).Row
+    
+    ' Format columns
+    wsLog.Columns("A:G").AutoFit
+    
+    ' Format timestamps
+    wsLog.Range("A4:A" & lastRow).NumberFormat = "yyyy-mm-dd hh:mm:ss"
+    
+    ' Conditional formatting for status column
+    Dim statusRange As Range
+    Set statusRange = wsLog.Range("E4:E" & lastRow)
+    
+    statusRange.FormatConditions.Delete
+    
+    ' Green for SUCCESS
+    statusRange.FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""SUCCESS"""
+    statusRange.FormatConditions(1).Interior.Color = RGB(198, 239, 206)
+    statusRange.FormatConditions(1).Font.Bold = True
+    
+    ' Yellow for WARNING
+    statusRange.FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""WARNING"""
+    statusRange.FormatConditions(2).Interior.Color = RGB(255, 235, 156)
+    statusRange.FormatConditions(2).Font.Bold = True
+    
+    ' Light Blue for INFO
+    statusRange.FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""INFO"""
+    statusRange.FormatConditions(3).Interior.Color = RGB(197, 217, 241)
+    
+    ' Red for ERROR
+    statusRange.FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, Formula1:="=""ERROR"""
+    statusRange.FormatConditions(4).Interior.Color = RGB(255, 199, 206)
+    statusRange.FormatConditions(4).Font.Bold = True
+    
+    ' Add duration visualization
+    Dim durationRange As Range
+    Set durationRange = wsLog.Range("G4:G" & lastRow)
+    
+    ' Add data bar conditional formatting for duration
+    durationRange.FormatConditions.AddDatabar
+    durationRange.FormatConditions(durationRange.FormatConditions.Count).ShowValue = True
+    durationRange.FormatConditions(durationRange.FormatConditions.Count).BarColor.Color = RGB(79, 129, 189)
+    
+    ' Add alternating row colors
+    Dim logDataRange As Range
+    Set logDataRange = wsLog.Range("A4:G" & lastRow)
+    
+    logDataRange.FormatConditions.Add Type:=xlExpression, Formula1:="=MOD(ROW(),2)=0"
+    logDataRange.FormatConditions(logDataRange.FormatConditions.Count).Interior.Color = RGB(240, 240, 240)
+    
+    ' Add borders to the log table
+    wsLog.Range("A3:G" & lastRow).Borders.LineStyle = xlContinuous
+    wsLog.Range("A3:G3").Borders(xlEdgeBottom).Weight = xlMedium
+    
+    ' Freeze panes for easy scrolling
+    wsLog.Range("A4").Select
+    ActiveWindow.FreezePanes = True
+    
+    ' Add a footer with timestamp
+    wsLog.Rows(lastRow + 2).Font.Italic = True
+    wsLog.Range("A" & (lastRow + 2)).Value = "Report generated: " & Format(Now(), "yyyy-mm-dd hh:mm:ss") & " by " & Application.UserName
+    wsLog.Range("A" & (lastRow + 2) & ":G" & (lastRow + 2)).Merge
+    wsLog.Range("A" & (lastRow + 2) & ":G" & (lastRow + 2)).HorizontalAlignment = xlCenter
+    
+    ' Return to top of log
+    wsLog.Range("A1").Select
+End Sub
+
+'==========================================================
+' LOG PROGRESS HELPER FUNCTION
+'==========================================================
+Private Sub LogProgress(wsLog As Worksheet, logRow As Long, step As String, component As String, action As String, status As String, details As String, duration As Double)
+    ' Log progress to the process log
+    With wsLog
+        .Cells(logRow, 1).Value = Now()
+        .Cells(logRow, 2).Value = step
+        .Cells(logRow, 3).Value = component
+        .Cells(logRow, 4).Value = action
+        .Cells(logRow, 5).Value = status
+        .Cells(logRow, 6).Value = details
+        .Cells(logRow, 7).Value = duration
+    End With
+End Sub
+
+'==========================================================
+' HELPER FUNCTION TO FIND COLUMN INDEX
+'==========================================================
+Private Function GetColumnIndex(headerRow As Variant, columnName As String) As Integer
+    Dim i As Integer
+    
+    ' Default to -1 (not found)
+    GetColumnIndex = -1
+    
+    ' Loop through all columns in the header row
+    For i = LBound(headerRow, 2) To UBound(headerRow, 2)
+        If Trim(CStr(headerRow(1, i))) = columnName Then
+            GetColumnIndex = i
+            Exit Function
+        End If
+    Next i
+End Function
+
+'==========================================================
+' RUN COMPLETE PROCESS WITH ENHANCED LOGGING
+'==========================================================
+Public Sub RunCompleteEnhancedProcess()
+    ' This procedure runs the complete process:
+    ' 1. Import XRP data as arrays
+    ' 2. Run full comparison with enhanced reporting
+    
+    Dim startTime As Date
+    startTime = Now()
+    
+    ' Import XRP data
+    ImportXRPDataAsArrays
+    
+    ' Run full comparison
+    RunFullComparisonProcess
+    
+    ' Calculate total process time
+    Dim totalTime As String
+    totalTime = Format(Now() - startTime, "hh:mm:ss")
+    
+    MsgBox "Complete enhanced comparison process has been executed successfully!" & vbCrLf & vbCrLf & _
+           "Total processing time: " & totalTime, vbInformation, "Process Completion"
+End Sub
