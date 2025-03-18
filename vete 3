@@ -415,16 +415,53 @@ Public Sub CompareParentsDirectly()
         End With
     End If
     
-    ' Create table from the data
-    Dim comparisonTable As ListObject
-    Set comparisonTable = wsOutput.ListObjects.Add(xlSrcRange, wsOutput.Range("A4:G" & (outputRow - 1)), , xlYes)
-    comparisonTable.Name = "DirectComparisonTable"
-    comparisonTable.TableStyle = "TableStyleMedium2"
-    comparisonTable.ShowAutoFilterDropDown = True
+    ' Create table from the data - Skip if number of rows exceeds Excel's formula limit
+    If (outputRow - 4) > 8000 Then
+        ' Just format as a regular range without creating a table object to avoid formula length limitations
+        With wsOutput.Range("A4:G" & (outputRow - 1))
+            .Borders.LineStyle = xlContinuous
+            .Borders.Weight = xlThin
+            .Borders.Color = RGB(180, 180, 180)
+            wsOutput.Range("A4:G4").Interior.Color = RGB(200, 200, 200)
+        End With
+        ' Add filters
+        wsOutput.Range("A4:G4").AutoFilter
+    Else
+        Dim comparisonTable As ListObject
+        Set comparisonTable = wsOutput.ListObjects.Add(xlSrcRange, wsOutput.Range("A4:G" & (outputRow - 1)), , xlYes)
+        comparisonTable.Name = "DirectComparisonTable"
+        comparisonTable.TableStyle = "TableStyleMedium2"
+        comparisonTable.ShowAutoFilterDropDown = True
+    End If
     
     ' Add a status summary table below the main data
     Dim summaryStartRow As Long
     summaryStartRow = outputRow + 2
+    
+    ' Variables to store counts instead of using large formulas
+    Dim matchCount As Long, missingXRPCount As Long, missingSVCount As Long, diffParentCount As Long
+    Dim totalCount As Long
+    
+    ' Calculate counts manually
+    matchCount = 0
+    missingXRPCount = 0
+    missingSVCount = 0
+    diffParentCount = 0
+    
+    For i = 5 To outputRow - 1
+        Select Case wsOutput.Cells(i, 7).Value
+            Case "Match"
+                matchCount = matchCount + 1
+            Case "Missing in XRP"
+                missingXRPCount = missingXRPCount + 1
+            Case "Missing in SmartView"
+                missingSVCount = missingSVCount + 1
+            Case "Different Parent"
+                diffParentCount = diffParentCount + 1
+        End Select
+    Next i
+    
+    totalCount = matchCount + missingXRPCount + missingSVCount + diffParentCount
     
     With wsOutput
         .Range("A" & summaryStartRow).Value = "Summary"
@@ -437,34 +474,50 @@ Public Sub CompareParentsDirectly()
         .Range("A" & (summaryStartRow + 2) & ":C" & (summaryStartRow + 2)).Font.Bold = True
         .Range("A" & (summaryStartRow + 2) & ":C" & (summaryStartRow + 2)).Interior.Color = RGB(200, 200, 200)
         
-        ' Add status rows with COUNTIF formulas
+        ' Add status rows with direct values instead of formulas
         .Range("A" & (summaryStartRow + 3)).Value = "Match"
-        .Range("B" & (summaryStartRow + 3)).Formula = "=COUNTIFS(DirectComparisonTable[Status],""Match"")"
-        .Range("C" & (summaryStartRow + 3)).Formula = "=B" & (summaryStartRow + 3) & "/COUNTA(DirectComparisonTable[Status])"
+        .Range("B" & (summaryStartRow + 3)).Value = matchCount
+        If totalCount > 0 Then
+            .Range("C" & (summaryStartRow + 3)).Value = matchCount / totalCount
+        Else
+            .Range("C" & (summaryStartRow + 3)).Value = 0
+        End If
         .Range("C" & (summaryStartRow + 3)).NumberFormat = "0.0%"
         .Range("A" & (summaryStartRow + 3) & ":C" & (summaryStartRow + 3)).Interior.Color = RGB(198, 239, 206)
         
         .Range("A" & (summaryStartRow + 4)).Value = "Missing in XRP"
-        .Range("B" & (summaryStartRow + 4)).Formula = "=COUNTIFS(DirectComparisonTable[Status],""Missing in XRP"")"
-        .Range("C" & (summaryStartRow + 4)).Formula = "=B" & (summaryStartRow + 4) & "/COUNTA(DirectComparisonTable[Status])"
+        .Range("B" & (summaryStartRow + 4)).Value = missingXRPCount
+        If totalCount > 0 Then
+            .Range("C" & (summaryStartRow + 4)).Value = missingXRPCount / totalCount
+        Else
+            .Range("C" & (summaryStartRow + 4)).Value = 0
+        End If
         .Range("C" & (summaryStartRow + 4)).NumberFormat = "0.0%"
         .Range("A" & (summaryStartRow + 4) & ":C" & (summaryStartRow + 4)).Interior.Color = RGB(255, 199, 206)
         
         .Range("A" & (summaryStartRow + 5)).Value = "Missing in SmartView"
-        .Range("B" & (summaryStartRow + 5)).Formula = "=COUNTIFS(DirectComparisonTable[Status],""Missing in SmartView"")"
-        .Range("C" & (summaryStartRow + 5)).Formula = "=B" & (summaryStartRow + 5) & "/COUNTA(DirectComparisonTable[Status])"
+        .Range("B" & (summaryStartRow + 5)).Value = missingSVCount
+        If totalCount > 0 Then
+            .Range("C" & (summaryStartRow + 5)).Value = missingSVCount / totalCount
+        Else
+            .Range("C" & (summaryStartRow + 5)).Value = 0
+        End If
         .Range("C" & (summaryStartRow + 5)).NumberFormat = "0.0%"
         .Range("A" & (summaryStartRow + 5) & ":C" & (summaryStartRow + 5)).Interior.Color = RGB(255, 235, 156)
         
         .Range("A" & (summaryStartRow + 6)).Value = "Different Parent"
-        .Range("B" & (summaryStartRow + 6)).Formula = "=COUNTIFS(DirectComparisonTable[Status],""Different Parent"")"
-        .Range("C" & (summaryStartRow + 6)).Formula = "=B" & (summaryStartRow + 6) & "/COUNTA(DirectComparisonTable[Status])"
+        .Range("B" & (summaryStartRow + 6)).Value = diffParentCount
+        If totalCount > 0 Then
+            .Range("C" & (summaryStartRow + 6)).Value = diffParentCount / totalCount
+        Else
+            .Range("C" & (summaryStartRow + 6)).Value = 0
+        End If
         .Range("C" & (summaryStartRow + 6)).NumberFormat = "0.0%"
         .Range("A" & (summaryStartRow + 6) & ":C" & (summaryStartRow + 6)).Interior.Color = RGB(197, 217, 241)
         
         .Range("A" & (summaryStartRow + 7)).Value = "Total"
-        .Range("B" & (summaryStartRow + 7)).Formula = "=SUM(B" & (summaryStartRow + 3) & ":B" & (summaryStartRow + 6) & ")"
-        .Range("C" & (summaryStartRow + 7)).Formula = "=SUM(C" & (summaryStartRow + 3) & ":C" & (summaryStartRow + 6) & ")"
+        .Range("B" & (summaryStartRow + 7)).Value = totalCount
+        .Range("C" & (summaryStartRow + 7)).Value = 1
         .Range("C" & (summaryStartRow + 7)).NumberFormat = "0.0%"
         .Range("A" & (summaryStartRow + 7) & ":C" & (summaryStartRow + 7)).Font.Bold = True
         .Range("A" & (summaryStartRow + 7) & ":C" & (summaryStartRow + 7)).Borders(xlEdgeTop).LineStyle = xlContinuous
