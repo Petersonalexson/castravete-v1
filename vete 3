@@ -2,6 +2,7 @@ Option Explicit
 
 '==========================================================
 ' DIRECT COMPARISON OF PARENTS BETWEEN SMARTVIEW AND XRP
+' Gets array names from Lists sheet (E3 and E5)
 '==========================================================
 Public Sub CompareParentsDirectly()
     ' This procedure directly compares parents between SmartViewData and XRP arrays
@@ -24,6 +25,8 @@ Public Sub CompareParentsDirectly()
     Dim xrpParent As String
     Dim matchFound As Boolean
     Dim status As String
+    Dim ws As Worksheet
+    Dim lo As ListObject
     
     ' Get array names from Lists sheet
     On Error Resume Next
@@ -151,6 +154,7 @@ Public Sub CompareParentsDirectly()
     On Error GoTo 0
     
     ' Find SmartViewData table
+    ' This is sourced from Power Query, so we need to find which sheet it's on
     Set svDataLO = Nothing
     For Each ws In ThisWorkbook.Worksheets
         For Each lo In ws.ListObjects
@@ -164,15 +168,16 @@ Public Sub CompareParentsDirectly()
     Next ws
     
     If svDataLO Is Nothing Then
+        ' If the SmartViewData table doesn't exist, log error and exit
         With wsProcessLog
             .Cells(logRow, 1) = Now
             .Cells(logRow, 2) = "System"
             .Cells(logRow, 3) = "Table Error"
             .Cells(logRow, 4) = "ERROR"
-            .Cells(logRow, 5) = "Could not find SmartViewData table"
+            .Cells(logRow, 5) = "Could not find SmartViewData table. Make sure Power Query output is loaded."
         End With
         logRow = logRow + 1
-        MsgBox "Could not find SmartViewData table. Please ensure it exists.", vbExclamation
+        MsgBox "Could not find SmartViewData table. Please ensure the Power Query output is loaded as a table named 'SmartViewData'.", vbExclamation
         Exit Sub
     End If
     
@@ -204,6 +209,20 @@ Public Sub CompareParentsDirectly()
                 svKeyCol = i
         End Select
     Next i
+    
+    ' Check if we found all the required columns
+    If svTypeCol = 0 Or svVSCCol = 0 Or svHierarchyCol = 0 Or svValueCol = 0 Or svParentCol = 0 Then
+        With wsProcessLog
+            .Cells(logRow, 1) = Now
+            .Cells(logRow, 2) = "System"
+            .Cells(logRow, 3) = "Column Error"
+            .Cells(logRow, 4) = "ERROR"
+            .Cells(logRow, 5) = "SmartViewData is missing required columns"
+        End With
+        logRow = logRow + 1
+        MsgBox "SmartViewData is missing required columns. Please check your Power Query output.", vbExclamation
+        Exit Sub
+    End If
     
     ' Get column indexes for Tree array
     Dim treeNameCol As Long, treeValueCol As Long, treeParentCol As Long, treeVSCCol As Long
@@ -238,7 +257,13 @@ Public Sub CompareParentsDirectly()
         svHierarchy = svDataLO.DataBodyRange.Cells(i, svHierarchyCol).Value
         svValue = svDataLO.DataBodyRange.Cells(i, svValueCol).Value
         svParent = svDataLO.DataBodyRange.Cells(i, svParentCol).Value
-        svKey = svDataLO.DataBodyRange.Cells(i, svKeyCol).Value
+        
+        ' Make sure we have a KEY column, if not, create one
+        If svKeyCol = 0 Then
+            svKey = svHierarchy & " | " & svValue
+        Else
+            svKey = svDataLO.DataBodyRange.Cells(i, svKeyCol).Value
+        End If
         
         matchFound = False
         xrpParent = ""
@@ -299,7 +324,14 @@ Public Sub CompareParentsDirectly()
         
         ' Look for this key in SmartViewData
         For i = 1 To svDataLO.DataBodyRange.Rows.Count
-            If svDataLO.DataBodyRange.Cells(i, svKeyCol).Value = treeKey And _
+            Dim compareKey As String
+            If svKeyCol > 0 Then
+                compareKey = svDataLO.DataBodyRange.Cells(i, svKeyCol).Value
+            Else
+                compareKey = svDataLO.DataBodyRange.Cells(i, svHierarchyCol).Value & " | " & svDataLO.DataBodyRange.Cells(i, svValueCol).Value
+            End If
+            
+            If compareKey = treeKey And _
                svDataLO.DataBodyRange.Cells(i, svTypeCol).Value = "Tree" And _
                svDataLO.DataBodyRange.Cells(i, svVSCCol).Value = treeArray(j, treeVSCCol) Then
                 matchFound = True
@@ -332,7 +364,13 @@ Public Sub CompareParentsDirectly()
         
         ' Look for this key in SmartViewData
         For i = 1 To svDataLO.DataBodyRange.Rows.Count
-            If svDataLO.DataBodyRange.Cells(i, svKeyCol).Value = listKey And _
+            If svKeyCol > 0 Then
+                compareKey = svDataLO.DataBodyRange.Cells(i, svKeyCol).Value
+            Else
+                compareKey = svDataLO.DataBodyRange.Cells(i, svHierarchyCol).Value & " | " & svDataLO.DataBodyRange.Cells(i, svValueCol).Value
+            End If
+            
+            If compareKey = listKey And _
                svDataLO.DataBodyRange.Cells(i, svTypeCol).Value = "List" And _
                svDataLO.DataBodyRange.Cells(i, svVSCCol).Value = listArray(j, listVSCCol) Then
                 matchFound = True
