@@ -1,3 +1,5 @@
+Option Explicit
+
 '==========================================================
 ' DIRECT COMPARISON OF PARENTS BETWEEN SMARTVIEW AND XRP
 ' Gets array names from Lists sheet (E3 and E5) OR uses tables directly
@@ -6,7 +8,7 @@ Public Sub CompareParentsDirectly()
     ' This procedure directly compares parents between SmartViewData and XRP arrays
     ' Logs to ProcessLog3 and outputs to the first sheet
     
-    ' Variable declarations
+    ' Variable declarations - all consolidated at the top
     Dim wsOutput As Worksheet
     Dim wsProcessLog As Worksheet
     Dim wsSVData As Worksheet
@@ -28,12 +30,22 @@ Public Sub CompareParentsDirectly()
     Dim compareKey As String
     Dim treeKey As String
     Dim listKey As String
-    
     Dim TREE_ARRAY_NAME As String
     Dim LIST_ARRAY_NAME As String
     Dim treeDataLO As ListObject
     Dim listDataLO As ListObject
     Dim usingArrays As Boolean
+    Dim treeNameCol As Long, treeValueCol As Long, treeParentCol As Long, treeVSCCol As Long
+    Dim listValueCol As Long, listVSCCol As Long
+    Dim treeDim1 As Long, treeDim2 As Long
+    Dim comparisonTable As ListObject
+    Dim summaryStartRow As Long
+    Dim matchCount As Long, missingXRPCount As Long, missingSVCount As Long, diffParentCount As Long
+    Dim totalCount As Long
+    Dim legendStartRow As Long
+    Dim svTypeCol As Long, svVSCCol As Long, svHierarchyCol As Long, svValueCol As Long, svParentCol As Long, svKeyCol As Long
+    Dim lastRow As Long
+    Dim statusRange As Range
     
     ' Create or get ProcessLog3 sheet
     On Error Resume Next
@@ -245,7 +257,6 @@ Public Sub CompareParentsDirectly()
     logRow = logRow + 1
     
     ' Get column indexes for SmartViewData
-    Dim svTypeCol As Long, svVSCCol As Long, svHierarchyCol As Long, svValueCol As Long, svParentCol As Long, svKeyCol As Long
     For i = 1 To svDataLO.HeaderRowRange.Columns.Count
         Select Case svDataLO.HeaderRowRange.Cells(1, i).Value
             Case "Type"
@@ -278,10 +289,6 @@ Public Sub CompareParentsDirectly()
     End If
     
     If usingArrays Then
-        ' Get column indexes for Tree array
-        Dim treeNameCol As Long, treeValueCol As Long, treeParentCol As Long, treeVSCCol As Long
-        Dim treeDim1 As Long, treeDim2 As Long
-        
         ' Log the tree array dimensions
         With wsProcessLog
             .Cells(logRow, 1) = Now
@@ -332,9 +339,6 @@ Public Sub CompareParentsDirectly()
             Exit Sub
         End If
         
-        ' Get column indexes for List array
-        Dim listValueCol As Long, listVSCCol As Long
-        
         ' Search for column indexes in list array headers (row 1)
         For j = 1 To UBound(listArray, 2)
             If Not IsError(listArray(1, j)) Then
@@ -362,8 +366,6 @@ Public Sub CompareParentsDirectly()
         End If
     Else
         ' Get column indexes for Tree table
-        Dim treeNameCol As Long, treeValueCol As Long, treeParentCol As Long, treeVSCCol As Long
-        
         For i = 1 To treeDataLO.HeaderRowRange.Columns.Count
             Select Case treeDataLO.HeaderRowRange.Cells(1, i).Value
                 Case "Tree_Name"
@@ -392,8 +394,6 @@ Public Sub CompareParentsDirectly()
         End If
         
         ' Get column indexes for List table
-        Dim listValueCol As Long, listVSCCol As Long
-        
         For i = 1 To listDataLO.HeaderRowRange.Columns.Count
             Select Case listDataLO.HeaderRowRange.Cells(1, i).Value
                 Case "Value"
@@ -632,12 +632,12 @@ Public Sub CompareParentsDirectly()
                         .Cells(outputRow, 5).Value = "" ' No SmartView parent
                         .Cells(outputRow, 6).Value = "" ' No XRP parent for List
                         .Cells(outputRow, 7).Value = "Missing in SmartView"
-                   End With
-                   outputRow = outputRow + 1
-               End If
-           End If
-       Next j
-   Else
+                    End With
+                    outputRow = outputRow + 1
+                End If
+            End If
+        Next j
+    Else
        For j = 1 To listDataLO.DataBodyRange.Rows.Count
            matchFound = False
            
@@ -709,7 +709,6 @@ Public Sub CompareParentsDirectly()
        ' Add filters
        wsOutput.Range("A4:G4").AutoFilter
    Else
-       Dim comparisonTable As ListObject
        Set comparisonTable = wsOutput.ListObjects.Add(xlSrcRange, wsOutput.Range("A4:G" & (outputRow - 1)), , xlYes)
        comparisonTable.Name = "DirectComparisonTable"
        comparisonTable.TableStyle = "TableStyleMedium2"
@@ -717,19 +716,15 @@ Public Sub CompareParentsDirectly()
    End If
    
    ' Add a status summary table below the main data
-   Dim summaryStartRow As Long
    summaryStartRow = outputRow + 2
    
    ' Variables to store counts instead of using large formulas
-   Dim matchCount As Long, missingXRPCount As Long, missingSVCount As Long, diffParentCount As Long
-   Dim totalCount As Long
-   
-   ' Calculate counts manually
    matchCount = 0
    missingXRPCount = 0
    missingSVCount = 0
    diffParentCount = 0
    
+   ' Calculate counts manually
    For i = 5 To outputRow - 1
        Select Case wsOutput.Cells(i, 7).Value
            Case "Match"
@@ -806,7 +801,6 @@ Public Sub CompareParentsDirectly()
    End With
    
    ' Add a legend
-   Dim legendStartRow As Long
    legendStartRow = summaryStartRow + 10
    
    With wsOutput
@@ -862,14 +856,12 @@ Private Sub FormatProcessLog(wsLog As Worksheet)
    ' Format the process log with conditional formatting
    
    ' Get last row
-   Dim lastRow As Long
    lastRow = wsLog.Cells(wsLog.Rows.Count, "A").End(xlUp).Row
    
    ' Format columns
    wsLog.Columns("A:E").AutoFit
    
    ' Conditional formatting for status column
-   Dim statusRange As Range
    Set statusRange = wsLog.Range("D2:D" & lastRow)
    
    statusRange.FormatConditions.Delete
