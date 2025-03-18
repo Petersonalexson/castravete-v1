@@ -1,0 +1,93 @@
+let
+    //--------------------------------------------------------------------
+    // 0) REFERENCE SMARTV_COMPARE
+    //    Keep KEY, Hierarchy Name, Value, Parent
+    //--------------------------------------------------------------------
+    SV_Raw = SmartV_Compare,
+    SVSelected = Table.SelectColumns(
+        SV_Raw,
+        {"KEY", "Hierarchy Name", "Value", "Parent"}
+    ),
+
+    //--------------------------------------------------------------------
+    // 1) REFERENCE ERPData_Compare
+    //    Rename Parent->ParentERP, keep KEY
+    //--------------------------------------------------------------------
+    ERPRaw = ERPData_Compare,
+    ERPRenamed = Table.RenameColumns(
+        ERPRaw,
+        {{"Parent", "ParentERP"}},
+        MissingField.Ignore
+    ),
+    ERPSelected = Table.SelectColumns(
+        ERPRenamed,
+        {"KEY", "ParentERP"}
+    ),
+
+    //--------------------------------------------------------------------
+    // 2) FULL OUTER JOIN ON KEY
+    //--------------------------------------------------------------------
+    FullJoin = Table.NestedJoin(
+        SVSelected,
+        {"KEY"},
+        ERPSelected,
+        {"KEY"},
+        "ERPData",
+        JoinKind.FullOuter
+    ),
+    Expanded = Table.ExpandTableColumn(
+        FullJoin,
+        "ERPData",
+        {"ParentERP"},
+        {"ParentERP"}
+    ),
+
+    //--------------------------------------------------------------------
+    // 3) STATUS LOGIC
+    //    We handle various cases, plus specifically treat both blank as a match.
+    //
+    //    Let svP = if null => "", else actual text
+    //    Let erpP = if null => "", else actual text
+    //
+    //    if both are "" => "Parent match"
+    //    else if one is "" and the other not => "Missing in SmartView"/"Missing in ERP"
+    //    else if they differ => "Parent mismatch"
+    //    else => "Parent match"
+    //--------------------------------------------------------------------
+    WithStatus = Table.AddColumn(
+        Expanded,
+        "Status",
+        each
+            let
+                svP = if [Parent] = null then "" else [Parent],
+                erpP = if [ParentERP] = null then "" else [ParentERP]
+            in
+                if svP = "" and erpP = "" then
+                    "Parent match"             // both blank or null => match
+                else if svP = "" and erpP <> "" then
+                    "Missing in SmartView"     // left is empty, right isn't
+                else if svP <> "" and erpP = "" then
+                    "Missing in ERP"           // left has parent, right doesn't
+                else if svP <> erpP then
+                    "Parent mismatch"
+                else
+                    "Parent match"
+    ),
+
+    //--------------------------------------------------------------------
+    // 4) REORDER / SELECT FINAL COLUMNS
+    //    KEY, Hierarchy Name, Value, Parent, ParentERP, Status
+    //--------------------------------------------------------------------
+    FinalColumns = Table.SelectColumns(
+        WithStatus,
+        {
+            "KEY",
+            "Hierarchy Name",
+            "Value",
+            "Parent",
+            "ParentERP",
+            "Status"
+        }
+    )
+in
+    FinalColumns
