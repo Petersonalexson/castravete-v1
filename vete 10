@@ -1,7 +1,7 @@
 let
     // -------------------------------------------------------------------
     // 0) REFERENCE THE EXISTING SMARTVIEWDATA QUERY
-    //    We assume it has: KEY, Type, Parent, Value, Hierarchy Name, etc.
+    //    (We assume it has: KEY, Type, Parent, Value, Hierarchy Name, etc.)
     // -------------------------------------------------------------------
     SV = SmartViewData,
 
@@ -10,16 +10,17 @@ let
     // -------------------------------------------------------------------
     // ---- 1a) XRP Tree
     XRPTreeRaw = Excel.CurrentWorkbook(){[Name="XRP_Tree_Array"]}[Content],
+    // If your headers are already correct, comment out the next line:
     XRPTreePromoted = Table.PromoteHeaders(XRPTreeRaw),
-    // Rename Dimension_Name->Hierarchy Name if needed
+    // Rename "Dimension_Name" -> "Hierarchy Name" if needed; otherwise remove/skip:
     XRPTreeRenamed = Table.RenameColumns(
         XRPTreePromoted,
         {{"Dimension_Name", "Hierarchy Name"}},
         MissingField.Ignore
     ),
-    // Ensure Parent is text
+    // Ensure Parent is text (avoids type issues if numeric/blank):
     XRPTreeParentAsText = Table.TransformColumnTypes(XRPTreeRenamed, {{"Parent", type text}}),
-    // Add KEY = [Hierarchy Name] | [Value]
+    // Add KEY = [Hierarchy Name] & " | " & [Value] if not already present:
     XRPTreeWithKey = Table.AddColumn(
         XRPTreeParentAsText,
         "KEY",
@@ -36,24 +37,25 @@ let
 
     // ---- 1b) XRP List
     XRPListRaw = Excel.CurrentWorkbook(){[Name="XRP_List_Array"]}[Content],
+    // If your headers are correct, comment out next line:
     XRPListPromoted = Table.PromoteHeaders(XRPListRaw),
-    // Possibly rename columns if needed: e.g., Column1->Value, Column2->V_S_C
+    // If columns are already named [Value], [V_S_C], etc., skip rename:
     XRPListRenamed = XRPListPromoted,
-    // Add blank Parent
+    // Add blank Parent if needed
     XRPListWithParent = Table.AddColumn(
         XRPListRenamed,
         "Parent",
         each "",
         type text
     ),
-    // Add "Hierarchy Name" = [V_S_C], if that's desired
+    // Optionally define "Hierarchy Name" from [V_S_C], if needed:
     XRPListWithHierarchy = Table.AddColumn(
         XRPListWithParent,
         "Hierarchy Name",
         each Text.From([V_S_C]),
         type text
     ),
-    // Add KEY = [Hierarchy Name] | [Value]
+    // Add KEY = [Hierarchy Name] & " | " & [Value]
     XRPListWithKey = Table.AddColumn(
         XRPListWithHierarchy,
         "KEY",
@@ -90,11 +92,7 @@ let
         {"Parent", "ERP_Type"},
         {"ERP_Parent", "ERP_Type"}
     ),
-    // 2b) Add a Status column for these rows
-    //    If no match => ERP_Parent=null => "Missing in ERP"
-    //    If Type=Tree & parents differ => "Different Parent"
-    //    Else "Match" (for anything that does have ERP_Parent)
-    //    For List, we typically won't do "Different Parent" check, but you can skip or unify logic
+    // 2b) Add a Status column
     WithStatus1 = Table.AddColumn(
         ExpandERP,
         "Status",
@@ -119,8 +117,7 @@ let
         "SVMatches",
         JoinKind.LeftAnti
     ),
-    // We don't need to expand anything. If a row is here, it means it's missing in SV
-    // Let's rename "Parent" to "ERP_Parent" for clarity
+    // If a row is here, it’s missing in SV. Rename "Parent" -> "ERP_Parent" for clarity:
     ERPWithRenamedParent = Table.RenameColumns(ERPAntiJoin, {{"Parent", "ERP_Parent"}}),
 
     // Add "Status" = "Missing in SmartView"
