@@ -1,6 +1,6 @@
 let
     //--------------------------------------------------------------------
-    // 0) REFERENCE SmartV_Compare
+    // 0) REFERENCE SMARTV_COMPARE
     //    Keep KEY, Hierarchy Name, Value, Parent
     //--------------------------------------------------------------------
     SV_Raw = SmartV_Compare,
@@ -11,7 +11,7 @@ let
 
     //--------------------------------------------------------------------
     // 1) REFERENCE ERPData_Compare
-    //    Rename Parent -> ParentERP, Keep KEY
+    //    Rename Parent -> ParentERP, keep KEY
     //--------------------------------------------------------------------
     ERPRaw = ERPData_Compare,
     ERPRenamed = Table.RenameColumns(
@@ -22,7 +22,6 @@ let
     ERPSelected = Table.SelectColumns(
         ERPRenamed,
         {"KEY", "ParentERP"}
-        // If you also need Hierarchy Name or Value from ERP, add them here
     ),
 
     //--------------------------------------------------------------------
@@ -45,23 +44,30 @@ let
 
     //--------------------------------------------------------------------
     // 3) STATUS LOGIC
-    //    - If left side (SV) missing => "Missing in SmartView"
-    //    - If right side (ERP) missing => "Missing in ERP"
-    //    - If both parents exist but differ => "Parent mismatch"
+    //    - If Parent=null AND ParentERP=null => "Parent match"
+    //    - Else if Parent=null => "Missing in SmartView"
+    //    - Else if ParentERP=null => "Missing in ERP"
+    //    - Else if Parent<>ParentERP => "Parent mismatch"
     //    - Else => "Parent match"
     //--------------------------------------------------------------------
     WithStatus = Table.AddColumn(
         Expanded,
         "Status",
         each 
-            if [#"Hierarchy Name"] = null and [Parent] = null then
-                "Missing in SmartView"
-            else if [ParentERP] = null then
-                "Missing in ERP"
-            else if [Parent] <> null and [ParentERP] <> null and [Parent] <> [ParentERP] then
-                "Parent mismatch"
-            else
-                "Parent match"
+            let 
+                svParent = [Parent],
+                erpParent = [ParentERP]
+            in
+                if svParent=null and erpParent=null then
+                    "Parent match"
+                else if svParent=null then
+                    "Missing in SmartView"
+                else if erpParent=null then
+                    "Missing in ERP"
+                else if svParent<>erpParent then
+                    "Parent mismatch"
+                else
+                    "Parent match"
     ),
 
     //--------------------------------------------------------------------
