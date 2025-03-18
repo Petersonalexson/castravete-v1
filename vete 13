@@ -1,0 +1,150 @@
+let
+    //--------------------------------------------------------------------
+    // 0) REFERENCE SMARTV_COMPARE
+    //    Ensure we keep KEY, Hierarchy Name, Value, Parent, Value Type
+    //--------------------------------------------------------------------
+    SVSource = SmartV_Compare,
+    SVSelected = Table.SelectColumns(
+        SVSource,
+        {"KEY", "Hierarchy Name", "Value", "Parent", "Value Type"}
+    ),
+
+    //--------------------------------------------------------------------
+    // 1) REFERENCE ERPData_Compare
+    //    Create "Hierarchy Name" based on [Value Type]:
+    //      - If "Tree" => [Tree_Version_Name]
+    //      - If "List" => [Value_Set_Code]
+    //    Rename Parent => ParentXRP
+    //    Keep KEY, Hierarchy Name, Value, ParentXRP, Value Type
+    //--------------------------------------------------------------------
+    ERPSource = ERPData_Compare,
+
+    // Add a new column "TempHierarchy" to pick from Tree_Version_Name or Value_Set_Code
+    AddHierarchyName = Table.AddColumn(
+        ERPSource,
+        "TempHierarchy",
+        each if [Value Type] = "Tree"
+             then [Tree_Version_Name]
+             else if [Value Type] = "List"
+             then [Value_Set_Code]
+             else null
+    ),
+
+    // Rename [Parent] to [ParentXRP] so we can keep both
+    RenameParent = Table.RenameColumns(
+        AddHierarchyName,
+        {{"Parent", "ParentXRP"}}
+    ),
+
+    // Now select final columns
+    ERPSelected = Table.SelectColumns(
+        RenameParent,
+        {"KEY", "TempHierarchy", "Value", "ParentXRP", "Value Type"}
+    ),
+
+    // Rename "TempHierarchy" -> "Hierarchy Name" to unify naming
+    ERPFixed = Table.RenameColumns(
+        ERPSelected,
+        {{"TempHierarchy", "Hierarchy Name"}}
+    ),
+
+    //--------------------------------------------------------------------
+    // 2) FULL OUTER JOIN ON [KEY]
+    //--------------------------------------------------------------------
+    // This ensures we see items unique to SmartV or ERP or both
+    FullJoin = Table.NestedJoin(
+        SVSelected,
+        {"KEY"},
+        ERPFixed,
+        {"KEY"},
+        "ERPData",
+        JoinKind.FullOuter
+    ),
+
+    // Expand columns from ERP side
+    ExpandERP = Table.ExpandTableColumn(
+        FullJoin,
+        "ERPData",
+        {
+            "Hierarchy Name",
+            "Value",
+            "ParentXRP",
+            "Value Type"
+        },
+        {
+            "ERP_HierarchyName",
+            "ERP_Value",
+            "ParentXRP",
+            "ERP_ValueType"
+        }
+    ),
+
+    //--------------------------------------------------------------------
+    // 3) DETERMINE FINAL HIERARCHY NAME, VALUE, PARENT, PARENTXRP
+    //    - If left side is null, take from right side
+    //    - If right side is null, take from left side
+    //    We unify "Hierarchy Name" and "Value" so final row has something
+    //--------------------------------------------------------------------
+    AddCombinedHierarchy = Table.AddColumn(
+        ExpandERP,
+        "FinalHierarchy",
+        each if [Hierarchy Name] <> null
+             then [Hierarchy Name]
+             else [ERP_HierarchyName]
+    ),
+    AddCombinedValue = Table.AddColumn(
+        AddCombinedHierarchy,
+        "FinalValue",
+        each if [Value] <> null
+             then [Value]
+             else [ERP_Value]
+    ),
+
+    //--------------------------------------------------------------------
+    // 4) STATUS LOGIC
+    //
+    // "Parent missing in SmartView" => if the row from SV is null
+    //    (i.e. [Hierarchy Name] = null and [Parent] = null)
+    // "Parent missing in ERP" => if the row from ERP is null
+    //    ([ERP_HierarchyName] = null and [ParentXRP] = null)
+    // "Parent mismatch" => if both sides exist, but [Parent]<>[ParentXRP]
+    // "Parent match" => everything else
+    //--------------------------------------------------------------------
+    AddStatus = Table.AddColumn(
+        AddCombinedValue,
+        "Status",
+        each 
+            if [Hierarchy Name] = null and [Parent] = null then
+                "Parent missing in SmartView"
+            else if [ERP_HierarchyName] = null and [ParentXRP] = null then
+                "Parent missing in ERP"
+            else if [Parent] <> null and [ParentXRP] <> null and [Parent] <> [ParentXRP] then
+                "Parent mismatch"
+            else
+                "Parent match"
+    ),
+
+    //--------------------------------------------------------------------
+    // 5) SELECT & RENAME COLUMNS TO FINAL LAYOUT
+    //    KEY, Hierarchy Name, Value, Parent, ParentXRP, Status
+    //--------------------------------------------------------------------
+    FinalSelected = Table.SelectColumns(
+        AddStatus,
+        {
+            "KEY",
+            "FinalHierarchy",
+            "FinalValue",
+            "Parent",
+            "ParentXRP",
+            "Status"
+        }
+    ),
+    FinalRenamed = Table.RenameColumns(
+        FinalSelected,
+        {
+            {"FinalHierarchy", "Hierarchy Name"},
+            {"FinalValue", "Value"}
+        }
+    )
+in
+    FinalRenamed
