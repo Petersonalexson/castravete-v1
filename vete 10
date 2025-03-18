@@ -10,14 +10,14 @@ let
     // Convert first row to headers
     XRPTreeWithHeaders = Table.PromoteHeaders(XRPTreeArray, [PromoteAllScalars=true]),
     
-    // Create a structured Tree table with proper column names - ensure Dimension_Name is used
+    // Create a structured Tree table with proper column names
     XRPTreeClean = Table.SelectColumns(XRPTreeWithHeaders, {"Dimension_Name", "Value", "Parent", "V_S_C"}),
     
-    // Rename and add type-specific columns
+    // Rename Dimension_Name to Hierarchy Name for Tree items
     XRPTreeTable = Table.RenameColumns(XRPTreeClean, {{"Dimension_Name", "Hierarchy Name"}}),
     XRPTreeWithType = Table.AddColumn(XRPTreeTable, "Type", each "Tree", type text),
     
-    // Add KEY column to Tree data - with explicit text conversion using Hierarchy Name (from Dimension_Name)
+    // Add KEY column to Tree data using Hierarchy Name - with explicit text conversion
     XRPTreeWithKey = Table.AddColumn(XRPTreeWithType, "KEY", each Text.From([Hierarchy Name]) & " | " & Text.From([Value]), type text),
     
     // Step 4: Process List data
@@ -27,28 +27,23 @@ let
     // Create a structured List table
     XRPListClean = Table.SelectColumns(XRPListWithHeaders, {"Value", "V_S_C"}),
     
-    // For List data, create Hierarchy Name from V_S_C
+    // For List data, V_S_C is what we want to use, but we name the column "Hierarchy Name" for consistency
     XRPListWithHierarchy = Table.AddColumn(XRPListClean, "Hierarchy Name", each [V_S_C], type text),
-    
-    // Add empty Parent for List data - Lists ALWAYS have blank parents
     XRPListWithParent = Table.AddColumn(XRPListWithHierarchy, "Parent", each "", type text),
     XRPListWithType = Table.AddColumn(XRPListWithParent, "Type", each "List", type text),
     
-    // Add KEY column to List data - with explicit text conversion using V_S_C as part of the key
-    XRPListWithKey = Table.AddColumn(XRPListWithType, "KEY", each Text.From([V_S_C]) & " | " & Text.From([Value]), type text),
+    // Add KEY column to List data using V_S_C (now stored in Hierarchy Name) - with explicit text conversion
+    XRPListWithKey = Table.AddColumn(XRPListWithType, "KEY", each Text.From([Hierarchy Name]) & " | " & Text.From([Value]), type text),
     
     // Step 5: Combine both XRP data sources
     CombinedXRP = Table.Combine({XRPTreeWithKey, XRPListWithKey}),
     
-    // Step 6: Handle SmartView key creation based on type
-    SmartViewWithKey = Table.AddColumn(SmartViewData, "KEY", each 
-        if [Type] = "Tree" then Text.From([Hierarchy Name]) & " | " & Text.From([Value])
-        else Text.From([V_S_C]) & " | " & Text.From([Value]), 
-        type text),
+    // Step 6: Use SmartView data as is - KEY field already exists
+    // No need to create a new KEY column
     
     // Step 7: Separate SmartView data by Type
-    SVTree = Table.SelectRows(SmartViewWithKey, each [Type] = "Tree"),
-    SVList = Table.SelectRows(SmartViewWithKey, each [Type] = "List"),
+    SVTree = Table.SelectRows(SmartViewData, each [Type] = "Tree"),
+    SVList = Table.SelectRows(SmartViewData, each [Type] = "List"),
     
     // Step 8: Separate XRP data by Type
     XRPTree = Table.SelectRows(CombinedXRP, each [Type] = "Tree"),
@@ -64,7 +59,7 @@ let
         JoinKind.LeftOuter
     ),
     
-    // Use full record expansion to prevent parent issues for Tree data
+    // Use full record expansion to prevent parent issues
     SVTreeWithXRP = Table.ExpandTableColumn(
         SVTreeJoin,
         "XRPMatches",
@@ -82,7 +77,7 @@ let
         JoinKind.LeftOuter
     ),
     
-    // For List data, we already know Parent is always blank
+    // For List items, Parent is always blank, but we need to expand it consistently
     SVListWithXRP = Table.ExpandTableColumn(
         SVListJoin,
         "XRPMatches",
@@ -135,7 +130,7 @@ let
     // Step 16: Combine all results
     AllResults = Table.Combine({SVWithXRPRenamed, XRPOnlyWithSVParent}),
     
-    // Step 17: Add Status column with parent comparison for Tree type only
+    // Step 17: Add Status column
     WithStatus = Table.AddColumn(AllResults, "Status", each
         if [SV_Value] = null then "Missing in SmartView"
         else if [XRP_Parent] = null then "Missing in XRP"
