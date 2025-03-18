@@ -3,6 +3,7 @@ Option Explicit
 '==========================================================
 ' DIRECT COMPARISON OF PARENTS BETWEEN SMARTVIEW AND XRP
 ' Gets array names from Lists sheet (E3 and E5)
+' Compatible with arrays created by ImportXRPDataAsArrays
 '==========================================================
 Public Sub CompareParentsDirectly()
     ' This procedure directly compares parents between SmartViewData and XRP arrays
@@ -27,6 +28,9 @@ Public Sub CompareParentsDirectly()
     Dim status As String
     Dim ws As Worksheet
     Dim lo As ListObject
+    Dim compareKey As String
+    Dim treeKey As String
+    Dim listKey As String
     
     ' Get array names from Lists sheet
     On Error Resume Next
@@ -124,33 +128,35 @@ Public Sub CompareParentsDirectly()
     
     ' Get XRP arrays
     On Error Resume Next
-    treeArray = ThisWorkbook.Names(TREE_ARRAY_NAME).RefersToRange.Value
-    If Err.Number <> 0 Then
+    If ThisWorkbook.Names.Item(TREE_ARRAY_NAME) Is Nothing Then
         With wsProcessLog
             .Cells(logRow, 1) = Now
             .Cells(logRow, 2) = "System"
             .Cells(logRow, 3) = "Array Error"
             .Cells(logRow, 4) = "ERROR"
-            .Cells(logRow, 5) = "Could not retrieve " & TREE_ARRAY_NAME & ". Error: " & Err.Description
+            .Cells(logRow, 5) = "Could not find " & TREE_ARRAY_NAME & ". Make sure you've imported the data first."
         End With
         logRow = logRow + 1
-        MsgBox "Could not retrieve " & TREE_ARRAY_NAME & ". Please ensure it exists.", vbExclamation
+        MsgBox "Could not find " & TREE_ARRAY_NAME & ". Please run ImportXRPDataAsArrays first.", vbExclamation
         Exit Sub
     End If
     
-    listArray = ThisWorkbook.Names(LIST_ARRAY_NAME).RefersToRange.Value
-    If Err.Number <> 0 Then
+    If ThisWorkbook.Names.Item(LIST_ARRAY_NAME) Is Nothing Then
         With wsProcessLog
             .Cells(logRow, 1) = Now
             .Cells(logRow, 2) = "System"
             .Cells(logRow, 3) = "Array Error"
             .Cells(logRow, 4) = "ERROR"
-            .Cells(logRow, 5) = "Could not retrieve " & LIST_ARRAY_NAME & ". Error: " & Err.Description
+            .Cells(logRow, 5) = "Could not find " & LIST_ARRAY_NAME & ". Make sure you've imported the data first."
         End With
         logRow = logRow + 1
-        MsgBox "Could not retrieve " & LIST_ARRAY_NAME & ". Please ensure it exists.", vbExclamation
+        MsgBox "Could not find " & LIST_ARRAY_NAME & ". Please run ImportXRPDataAsArrays first.", vbExclamation
         Exit Sub
     End If
+    
+    ' Get the arrays as variant arrays
+    treeArray = ThisWorkbook.Names(TREE_ARRAY_NAME).RefersToRange.Value
+    listArray = ThisWorkbook.Names(LIST_ARRAY_NAME).RefersToRange.Value
     On Error GoTo 0
     
     ' Find SmartViewData table
@@ -225,30 +231,89 @@ Public Sub CompareParentsDirectly()
     End If
     
     ' Get column indexes for Tree array
+    ' IMPORTANT: This now looks for headers in row 1 of the array (as created by ImportXRPDataAsArrays)
     Dim treeNameCol As Long, treeValueCol As Long, treeParentCol As Long, treeVSCCol As Long
-    For i = 1 To UBound(treeArray, 2)
-        Select Case treeArray(1, i)
-            Case "Tree_Name"
-                treeNameCol = i
-            Case "Value"
-                treeValueCol = i
-            Case "Parent"
-                treeParentCol = i
-            Case "V_S_C"
-                treeVSCCol = i
-        End Select
-    Next i
+    Dim treeDim1 As Long, treeDim2 As Long
+    
+    ' Log the tree array dimensions to help with debugging
+    With wsProcessLog
+        .Cells(logRow, 1) = Now
+        .Cells(logRow, 2) = "System"
+        .Cells(logRow, 3) = "Array Info"
+        .Cells(logRow, 4) = "INFO"
+        If IsArray(treeArray) Then
+            If IsArray(treeArray(1, 1)) Then
+                treeDim1 = UBound(treeArray, 1)
+                treeDim2 = UBound(treeArray, 2)
+                .Cells(logRow, 5) = "Tree array dimensions: " & treeDim1 & " x " & treeDim2
+            ElseIf IsArray(treeArray) Then
+                .Cells(logRow, 5) = "Tree array is 1-dimensional or incorrectly formatted"
+            End If
+        Else
+            .Cells(logRow, 5) = "Tree array is not an array type"
+        End If
+    End With
+    logRow = logRow + 1
+    
+    ' Search for column indexes in tree array headers (row 1)
+    For j = 1 To UBound(treeArray, 2)
+        If Not IsError(treeArray(1, j)) Then
+            Select Case treeArray(1, j)
+                Case "Tree_Name"
+                    treeNameCol = j
+                Case "Value"
+                    treeValueCol = j
+                Case "Parent"
+                    treeParentCol = j
+                Case "V_S_C"
+                    treeVSCCol = j
+            End Select
+        End If
+    Next j
+    
+    ' Check if we found all required tree columns
+    If treeNameCol = 0 Or treeValueCol = 0 Or treeParentCol = 0 Or treeVSCCol = 0 Then
+        With wsProcessLog
+            .Cells(logRow, 1) = Now
+            .Cells(logRow, 2) = "System"
+            .Cells(logRow, 3) = "Column Error"
+            .Cells(logRow, 4) = "ERROR"
+            .Cells(logRow, 5) = "XRP Tree array is missing required columns"
+        End With
+        logRow = logRow + 1
+        MsgBox "XRP Tree array is missing required columns. Please check the imported data.", vbExclamation
+        Exit Sub
+    End If
     
     ' Get column indexes for List array
+    ' IMPORTANT: This now looks for headers in row 1 of the array (as created by ImportXRPDataAsArrays)
     Dim listValueCol As Long, listVSCCol As Long
-    For i = 1 To UBound(listArray, 2)
-        Select Case listArray(1, i)
-            Case "Value"
-                listValueCol = i
-            Case "V_S_C"
-                listVSCCol = i
-        End Select
-    Next i
+    
+    ' Search for column indexes in list array headers (row 1)
+    For j = 1 To UBound(listArray, 2)
+        If Not IsError(listArray(1, j)) Then
+            Select Case listArray(1, j)
+                Case "Value"
+                    listValueCol = j
+                Case "V_S_C"
+                    listVSCCol = j
+            End Select
+        End If
+    Next j
+    
+    ' Check if we found all required list columns
+    If listValueCol = 0 Or listVSCCol = 0 Then
+        With wsProcessLog
+            .Cells(logRow, 1) = Now
+            .Cells(logRow, 2) = "System"
+            .Cells(logRow, 3) = "Column Error"
+            .Cells(logRow, 4) = "ERROR"
+            .Cells(logRow, 5) = "XRP List array is missing required columns"
+        End With
+        logRow = logRow + 1
+        MsgBox "XRP List array is missing required columns. Please check the imported data.", vbExclamation
+        Exit Sub
+    End If
     
     ' Process SmartViewData table and compare with XRP arrays
     For i = 1 To svDataLO.DataBodyRange.Rows.Count
@@ -272,22 +337,30 @@ Public Sub CompareParentsDirectly()
         If svType = "Tree" Then
             ' Look for match in Tree array
             For j = 2 To UBound(treeArray, 1) ' Start at 2 to skip header row
-                If treeArray(j, treeVSCCol) = svVSC And _
-                   treeArray(j, treeNameCol) = svHierarchy And _
-                   treeArray(j, treeValueCol) = svValue Then
-                    matchFound = True
-                    xrpParent = treeArray(j, treeParentCol)
-                    Exit For
+                If Not IsError(treeArray(j, treeVSCCol)) And Not IsError(treeArray(j, treeNameCol)) And Not IsError(treeArray(j, treeValueCol)) Then
+                    If CStr(treeArray(j, treeVSCCol)) = svVSC And _
+                       CStr(treeArray(j, treeNameCol)) = svHierarchy And _
+                       CStr(treeArray(j, treeValueCol)) = svValue Then
+                        matchFound = True
+                        If Not IsError(treeArray(j, treeParentCol)) Then
+                            xrpParent = CStr(treeArray(j, treeParentCol))
+                        Else
+                            xrpParent = ""
+                        End If
+                        Exit For
+                    End If
                 End If
             Next j
         ElseIf svType = "List" Then
             ' Look for match in List array
             For j = 2 To UBound(listArray, 1) ' Start at 2 to skip header row
-                If listArray(j, listVSCCol) = svVSC And _
-                   listArray(j, listValueCol) = svValue Then
-                    matchFound = True
-                    xrpParent = "" ' List has no parent
-                    Exit For
+                If Not IsError(listArray(j, listVSCCol)) And Not IsError(listArray(j, listValueCol)) Then
+                    If CStr(listArray(j, listVSCCol)) = svVSC And _
+                       CStr(listArray(j, listValueCol)) = svValue Then
+                        matchFound = True
+                        xrpParent = "" ' List has no parent
+                        Exit For
+                    End If
                 End If
             Next j
         End If
@@ -316,80 +389,84 @@ Public Sub CompareParentsDirectly()
     
     ' Find items in XRP Tree array not in SmartViewData
     For j = 2 To UBound(treeArray, 1) ' Start at 2 to skip header row
-        matchFound = False
-        
-        ' Create key for comparison
-        Dim treeKey As String
-        treeKey = treeArray(j, treeNameCol) & " | " & treeArray(j, treeValueCol)
-        
-        ' Look for this key in SmartViewData
-        For i = 1 To svDataLO.DataBodyRange.Rows.Count
-            Dim compareKey As String
-            If svKeyCol > 0 Then
-                compareKey = svDataLO.DataBodyRange.Cells(i, svKeyCol).Value
-            Else
-                compareKey = svDataLO.DataBodyRange.Cells(i, svHierarchyCol).Value & " | " & svDataLO.DataBodyRange.Cells(i, svValueCol).Value
-            End If
+        If Not IsError(treeArray(j, treeVSCCol)) And Not IsError(treeArray(j, treeNameCol)) And Not IsError(treeArray(j, treeValueCol)) Then
+            matchFound = False
             
-            If compareKey = treeKey And _
-               svDataLO.DataBodyRange.Cells(i, svTypeCol).Value = "Tree" And _
-               svDataLO.DataBodyRange.Cells(i, svVSCCol).Value = treeArray(j, treeVSCCol) Then
-                matchFound = True
-                Exit For
+            ' Create key for comparison
+            treeKey = CStr(treeArray(j, treeNameCol)) & " | " & CStr(treeArray(j, treeValueCol))
+            
+            ' Look for this key in SmartViewData
+            For i = 1 To svDataLO.DataBodyRange.Rows.Count
+                If svKeyCol > 0 Then
+                    compareKey = svDataLO.DataBodyRange.Cells(i, svKeyCol).Value
+                Else
+                    compareKey = svDataLO.DataBodyRange.Cells(i, svHierarchyCol).Value & " | " & svDataLO.DataBodyRange.Cells(i, svValueCol).Value
+                End If
+                
+                If compareKey = treeKey And _
+                   svDataLO.DataBodyRange.Cells(i, svTypeCol).Value = "Tree" And _
+                   svDataLO.DataBodyRange.Cells(i, svVSCCol).Value = CStr(treeArray(j, treeVSCCol)) Then
+                    matchFound = True
+                    Exit For
+                End If
+            Next i
+            
+            ' If not found, add to output
+            If Not matchFound Then
+                With wsOutput
+                    .Cells(outputRow, 1).Value = "Tree"
+                    .Cells(outputRow, 2).Value = treeArray(j, treeVSCCol)
+                    .Cells(outputRow, 3).Value = treeArray(j, treeNameCol)
+                    .Cells(outputRow, 4).Value = treeArray(j, treeValueCol)
+                    .Cells(outputRow, 5).Value = "" ' No SmartView parent
+                    If Not IsError(treeArray(j, treeParentCol)) Then
+                        .Cells(outputRow, 6).Value = treeArray(j, treeParentCol)
+                    Else
+                        .Cells(outputRow, 6).Value = ""
+                    End If
+                    .Cells(outputRow, 7).Value = "Missing in SmartView"
+                End With
+                outputRow = outputRow + 1
             End If
-        Next i
-        
-        ' If not found, add to output
-        If Not matchFound Then
-            With wsOutput
-                .Cells(outputRow, 1).Value = "Tree"
-                .Cells(outputRow, 2).Value = treeArray(j, treeVSCCol)
-                .Cells(outputRow, 3).Value = treeArray(j, treeNameCol)
-                .Cells(outputRow, 4).Value = treeArray(j, treeValueCol)
-                .Cells(outputRow, 5).Value = "" ' No SmartView parent
-                .Cells(outputRow, 6).Value = treeArray(j, treeParentCol)
-                .Cells(outputRow, 7).Value = "Missing in SmartView"
-            End With
-            outputRow = outputRow + 1
         End If
     Next j
     
     ' Find items in XRP List array not in SmartViewData
     For j = 2 To UBound(listArray, 1) ' Start at 2 to skip header row
-        matchFound = False
-        
-        ' Create key for comparison
-        Dim listKey As String
-        listKey = listArray(j, listVSCCol) & " | " & listArray(j, listValueCol)
-        
-        ' Look for this key in SmartViewData
-        For i = 1 To svDataLO.DataBodyRange.Rows.Count
-            If svKeyCol > 0 Then
-                compareKey = svDataLO.DataBodyRange.Cells(i, svKeyCol).Value
-            Else
-                compareKey = svDataLO.DataBodyRange.Cells(i, svHierarchyCol).Value & " | " & svDataLO.DataBodyRange.Cells(i, svValueCol).Value
-            End If
+        If Not IsError(listArray(j, listVSCCol)) And Not IsError(listArray(j, listValueCol)) Then
+            matchFound = False
             
-            If compareKey = listKey And _
-               svDataLO.DataBodyRange.Cells(i, svTypeCol).Value = "List" And _
-               svDataLO.DataBodyRange.Cells(i, svVSCCol).Value = listArray(j, listVSCCol) Then
-                matchFound = True
-                Exit For
+            ' Create key for comparison
+            listKey = CStr(listArray(j, listVSCCol)) & " | " & CStr(listArray(j, listValueCol))
+            
+            ' Look for this key in SmartViewData
+            For i = 1 To svDataLO.DataBodyRange.Rows.Count
+                If svKeyCol > 0 Then
+                    compareKey = svDataLO.DataBodyRange.Cells(i, svKeyCol).Value
+                Else
+                    compareKey = svDataLO.DataBodyRange.Cells(i, svVSCCol).Value & " | " & svDataLO.DataBodyRange.Cells(i, svValueCol).Value
+                End If
+                
+                If compareKey = listKey And _
+                   svDataLO.DataBodyRange.Cells(i, svTypeCol).Value = "List" Then
+                    matchFound = True
+                    Exit For
+                End If
+            Next i
+            
+            ' If not found, add to output
+            If Not matchFound Then
+                With wsOutput
+                    .Cells(outputRow, 1).Value = "List"
+                    .Cells(outputRow, 2).Value = listArray(j, listVSCCol)
+                    .Cells(outputRow, 3).Value = listArray(j, listVSCCol) ' Use V_S_C as hierarchy name for List
+                    .Cells(outputRow, 4).Value = listArray(j, listValueCol)
+                    .Cells(outputRow, 5).Value = "" ' No SmartView parent
+                    .Cells(outputRow, 6).Value = "" ' No XRP parent for List
+                    .Cells(outputRow, 7).Value = "Missing in SmartView"
+                End With
+                outputRow = outputRow + 1
             End If
-        Next i
-        
-        ' If not found, add to output
-        If Not matchFound Then
-            With wsOutput
-                .Cells(outputRow, 1).Value = "List"
-                .Cells(outputRow, 2).Value = listArray(j, listVSCCol)
-                .Cells(outputRow, 3).Value = listArray(j, listVSCCol) ' Use V_S_C as hierarchy name for List
-                .Cells(outputRow, 4).Value = listArray(j, listValueCol)
-                .Cells(outputRow, 5).Value = "" ' No SmartView parent
-                .Cells(outputRow, 6).Value = "" ' No XRP parent for List
-                .Cells(outputRow, 7).Value = "Missing in SmartView"
-            End With
-            outputRow = outputRow + 1
         End If
     Next j
     
@@ -527,7 +604,7 @@ Public Sub CompareParentsDirectly()
     Dim legendStartRow As Long
     legendStartRow = summaryStartRow + 10
     
-    With wsOutput
+With wsOutput
         .Range("A" & legendStartRow).Value = "Legend"
         .Range("A" & legendStartRow).Font.Bold = True
         
