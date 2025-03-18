@@ -1,32 +1,15 @@
 let
-    // Load from the named range "XRP_Tree_Array" in this workbook
-    Source = Excel.CurrentWorkbook(){[Name="XRP_Tree_Array"]}[Content],
-
-    // OPTIONAL: Rename columns if your headers are something else.
-    // For example, if your columns come in as Column1, Column2, etc., 
-    // you can rename them to Tree_Name, Value, Parent, V_S_C:
-    //
-    // RenamedCols = Table.RenameColumns(Source,
-    //   {
-    //     {"Column1", "Tree_Name"},
-    //     {"Column2", "Value"},
-    //     {"Column3", "Parent"},
-    //     {"Column4", "V_S_C"}
-    //   }
-    // ),
-    // If your named range already has these headers, skip the rename step 
-    // and just use `Source` below.
-
-    // In this example, we assume the named range already has correct headers:
-    RenamedCols = Source,
-
-    // Add a KEY column so we can join Tree to SmartViewData
-    // Typically, KEY = [Tree_Name] & " | " & [Value]
-    AddKey = Table.AddColumn(
-        RenamedCols,
-        "KEY",
-        each [Tree_Name] & " | " & [Value],
-        type text
-    )
+    // Access the named range/array "XRPtree" from the current workbook
+    Source = Excel.CurrentWorkbook(){[Name="XRPtree"]}[Content],
+    
+    // Keep the original structure but ensure proper types
+    TypedData = Table.TransformColumnTypes(Source, {
+        // Add specific column types as needed, for example:
+        {"Tree_Name", type text},
+        {"Value", type text},
+        {"Parent", type text},
+        {"V_S_C", type text}
+        // Add other columns as needed
+    })
 in
-    AddKey
+    TypedData
