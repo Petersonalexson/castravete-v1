@@ -36,7 +36,7 @@ let
     WithNewKey = Table.AddColumn(
         Expanded,
         "NewKEY",
-        each if [KEY] <> null then [KEY] else [XRP KEY]
+        each if [KEY] = null then [XRP KEY] else [KEY]
     ),
     RemovedOldKey = Table.RemoveColumns(WithNewKey, {"KEY"}),
     RenamedKey = Table.RenameColumns(RemovedOldKey, {{"NewKEY", "KEY"}}),
