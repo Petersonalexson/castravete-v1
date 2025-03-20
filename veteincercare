@@ -1,0 +1,65 @@
+
+    
+    WithExtractedXRP = Table.AddColumn(
+        Expanded,
+        "XRP Extracted",
+        each if [Hierarchy Name] = null and [KEY] <> null then 
+            let
+                keyParts = Text.Split([KEY], "/"),
+                finalKey = keyParts{List.Count(keyParts)-1}
+            in
+                finalKey
+        else null
+    ),
+    
+    WithCombinedValues = Table.AddColumn(
+        WithExtractedXRP,
+        "Combined Hierarchy Name",
+        each if [Hierarchy Name] = null then [XRP Extracted] else [Hierarchy Name]
+    ),
+    
+    WithCombinedValues2 = Table.AddColumn(
+        WithCombinedValues,
+        "Combined Value",
+        each if [Value] = null then [XRP Extracted] else [Value]
+    ),
+    
+    WithStatus = Table.AddColumn(
+        WithCombinedValues2,
+        "Status",
+        each
+            let
+                svP = if [SView Parent] = null then "" else [SView Parent],
+                xrpP = if [XRP Parent] = null then "" else [XRP Parent]
+            in
+                if svP = "" and xrpP = "" then "Parent match"
+                else if svP = "" and xrpP <> "" then "Missing in SView"
+                else if svP <> "" and xrpP = "" then "Missing in XRP"
+                else if svP <> xrpP then "Parent mismatch"
+                else "Parent match"
+    ),
+    
+    WithDimensionAdded = Table.AddColumn(
+        WithStatus,
+        "Final Hierarchy",
+        each [Combined Hierarchy Name] & " - " & [Dimension]
+    ),
+
+    FinalColumns = Table.SelectColumns(
+        WithDimensionAdded,
+        {
+            "Final Hierarchy",
+            "Combined Hierarchy Name",
+            "Combined Value",
+            "SView Parent", 
+            "XRP Parent",
+            "Status",
+            "SView Path",
+            "XRP Path",
+            "Dimension"
+        }
+    ),
+
+    RemoveMatches = Table.SelectRows(FinalColumns, each [Status] <> "Parent match")
+in
+    RemoveMatches
