@@ -1,104 +1,101 @@
-Option Explicit
+let
 
-'==========================================================
-' MAIN: Refresh SmartView and create arrays
-'==========================================================
-Public Sub ZoomInAndCreateArrays()
-    RefreshSmartView
-    CreateSimpleArrays
-End Sub
+    SV_Original = SmartViewData_Comp,
+    SVRenamed = Table.RenameColumns(SV_Original, {{"Parent", "SmartView Parent"}}),
+    SVSelected = Table.SelectColumns(
+        SVRenamed,
+        {"KEY", "Hierarchy Name", "Value", "SmartView Parent", "SmartView Path"}
+    ),
+    
+    XRPOriginal = XRPData_Comp,
+    XRPRenamed = Table.RenameColumns(
+        XRPOriginal,
+        {{"Parent", "XRP Parent"}},
+        MissingField.Ignore
+    ),
+    
+    XRPSelected = Table.SelectColumns(
+        XRPRenamed,
+        {"KEY", "XRP Parent", "XRP Path"}
+    ),
+    
+    FullJoin = Table.NestedJoin(
+        SVSelected, {"KEY"}, XRPSelected, {"KEY"}, "XRPData", JoinKind.FullOuter
+    ),
+    
+    Expanded = Table.ExpandTableColumn(
+        FullJoin,
+        "XRPData", 
+        {"XRP Parent", "XRP Path"}, 
+        {"XRP Parent", "XRP Path"}
+    ),
+    
+    WithHierarchyName = Table.AddColumn(
+        Expanded,
+        "Hierarchy Name",
+        each if [Hierarchy Name] = null and [KEY] <> null then 
+            let
+                keyParts = Text.Split([KEY], "/"),
+                finalKey = keyParts{List.Count(keyParts)-1}
+            in
+                finalKey
+        else [Hierarchy Name]
+    ),
+    
+    WithValue = Table.AddColumn(
+        WithHierarchyName,
+        "Value",
+        each if [Value] = null and [KEY] <> null then 
+            let
+                keyParts = Text.Split([KEY], "/"),
+                finalKey = keyParts{List.Count(keyParts)-1}
+            in
+                finalKey
+        else [Value]
+    ),
+    
+    WithDimension = Table.AddColumn(
+        WithValue,
+        "Dimension",
+        each 
+            let
+                matchingRows = Table.SelectRows(Hierarchy_Matrix, (h) => h[Hierarchy Name] = [Hierarchy Name]),
+                dimensionValue = if Table.RowCount(matchingRows) > 0 then matchingRows{0}[Dimension] else null
+            in
+                dimensionValue
+    ),
+    
 
-'==========================================================
-' REFRESH SMARTVIEW - ZOOM IN ONLY
-'==========================================================
-Public Sub RefreshSmartView()
-    Dim arrSheets As Variant
-    Dim ws As Worksheet
-    Dim wsLists As Worksheet
-    Dim ConnectionName As String
-    Dim Ret As Long, HeaderRow As Long, LastRow As Long, I As Long
-    Dim ConnStatus As Integer
-    
-    Set wsLists = ThisWorkbook.Worksheets("Lists")
-    
-    With wsLists
-        ConnectionName = .Range("nmConnectionName").Value
-        arrSheets = .Range("Hierarchy_Matrix").Value
-    End With
-    
-    HeaderRow = 4
-    
-    For I = LBound(arrSheets) To UBound(arrSheets)
-        Set ws = ThisWorkbook.Worksheets(arrSheets(I, 1))
-        With ws
-            Ret = HypUIConnect(.Name, "", "", ConnectionName)
-            ConnStatus = HypConnected(.Name)
-            If ConnStatus <> -1 Then Stop
-            
-            'Calculate last row
-            LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
-            
-            'Delete hierarchy rows except hierarchy name
-            If LastRow > HeaderRow Then
-                .Rows(HeaderRow & ":" & LastRow - 1).Delete Shift:=xlUp
-            End If
-            
-            LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
-            Ret = HypSetSheetOption(.Name, HYP_SVC_OPTIONS_INDEX.HSV_MEMBER_DISPLAY, 1)
-            Ret = HypZoomIn(.Name, .Range("A" & LastRow), 1, False)
-            LastRow = .Range("A" & .Rows.Count).End(xlUp).Row
-            
-            ' Delete the named range if it exists
-            On Error Resume Next
-            ThisWorkbook.Names(arrSheets(I, 2)).Delete
-            On Error GoTo 0
-            
-            ThisWorkbook.Names.Add Name:=arrSheets(I, 2), RefersTo:=.Range("A" & HeaderRow & ":A" & LastRow)
-        End With
-    Next I
-End Sub
+    WithStatus = Table.AddColumn(
+        WithDimension,
+        "Status",
+        each
+            let
+                svP = if [SmartView Parent] = null then "" else [SmartView Parent],
+                xrpP = if [XRP Parent] = null then "" else [XRP Parent]
+            in
+                if svP = "" and xrpP = "" then "Parent match"
+                else if svP = "" and xrpP <> "" then "Missing in SmartView"
+                else if svP <> "" and xrpP = "" then "Missing in XRP"
+                else if svP <> xrpP then "Parent mismatch"
+                else "Parent match"
+    ),
 
-'==========================================================
-' CREATE SIMPLE ARRAYS - FROM ROW 3
-'==========================================================
-Public Sub CreateSimpleArrays()
-    Dim wsLists As Worksheet
-    Dim arrSheets As Variant
-    Dim i As Long
-    Dim rangeName As String
-    Dim hierarchyName As String
-    Dim arrCount As Long
-    
-    Set wsLists = ThisWorkbook.Worksheets("Lists")
-    arrSheets = wsLists.Range("Hierarchy_Matrix").Value
-    arrCount = 0
-    
-    For i = LBound(arrSheets) To UBound(arrSheets)
-        rangeName = Trim(arrSheets(i, 2))
-        hierarchyName = Trim(arrSheets(i, 3))
-        
-        ' Skip if empty
-        If rangeName = "" Then GoTo NextArray
-        
-        ' Create array starting from row 3
-        Dim rng As Range
-        Dim dataArray As Variant
-        
-        On Error Resume Next
-        Set rng = ThisWorkbook.Names(rangeName).RefersToRange
-        If rng Is Nothing Then GoTo NextArray
-        On Error GoTo 0
-        
-        ' Only if range has enough rows
-        If rng.Rows.Count >= 3 Then
-            ' Create array from row 3 to last row
-            dataArray = rng.Worksheet.Range(rng.Cells(3, 1), rng.Cells(rng.Rows.Count, 1)).Value
-            arrCount = arrCount + 1
-            ' The array is now in dataArray for this hierarchy
-        End If
-        
-NextArray:
-    Next i
-    
-    MsgBox "Created " & arrCount & " arrays", vbInformation
-End Sub
+    FinalColumns = Table.SelectColumns(
+        WithStatus,
+        {
+            "KEY",
+            "Hierarchy Name",
+            "Value",
+            "SmartView Parent", 
+            "XRP Parent",
+            "Status",
+            "SmartView Path",
+            "XRP Path",
+            "Dimension"
+        }
+    ),
+
+    RemoveMatches = Table.SelectRows(FinalColumns, each [Status] <> "Parent match")
+in
+    RemoveMatches
