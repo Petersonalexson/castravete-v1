@@ -1,6 +1,11 @@
 let
+
     SV_Original = SmartViewData_Comp,
-    SVRenamed = Table.RenameColumns(SV_Original, {{"Parent", "SmartView Parent"}}),
+    SVRenamed = Table.RenameColumns(
+        SV_Original,
+        {{"Parent", "SmartView Parent"}},
+        MissingField.Ignore
+    ),
     SVSelected = Table.SelectColumns(
         SVRenamed,
         {"KEY", "Hierarchy Name", "Value", "SmartView Parent", "SmartView Path"}
@@ -39,41 +44,72 @@ let
         each if [KEY] <> null then [KEY] else [XRP KEY]
     ),
 
-    WithExtractedValues = Table.AddColumn(
+
+    WithTempManipulation = Table.AddColumn(
         WithConsolidatedKey,
+        "TempKeyText",
+        each 
+            if [Hierarchy Name] = null and [Consolidated KEY] <> null 
+            then
+                let
+                    rawSplit = Text.Split([Consolidated KEY], "/"),
+                    lastSegment = List.Last(rawSplit)
+                in
+                    lastSegment
+            else
+                null
+    ),
+
+    WithExtractedValues = Table.AddColumn(
+        WithTempManipulation,
         "Extracted Parts",
-        each if [Hierarchy Name] = null and [Consolidated KEY] <> null then
-            let
-                keyParts = Text.Split([Consolidated KEY], "/"),
-                finalKey = List.Last(keyParts)
-            in
-                if Text.Contains(finalKey, " | ") then
-                    Text.Split(finalKey, " | ")
-                else
-                    {finalKey, finalKey}
-        else
-            null
+        each 
+            if [Hierarchy Name] = null and [TempKeyText] <> null then
+                let
+                    finalKey = [TempKeyText],
+                    splitted = 
+                        if Text.Contains(finalKey, " | ") 
+                        then Text.Split(finalKey, " | ")
+                        else {finalKey, finalKey}
+                in
+                    splitted
+            else
+                null
     ),
 
     WithFinalHierarchy = Table.AddColumn(
         WithExtractedValues,
         "Final Hierarchy Name",
-        each if [Hierarchy Name] = null and [Extracted Parts] <> null
-            then if List.Count([Extracted Parts]) > 0 then [Extracted Parts]{0} else null
-            else [Hierarchy Name]
+        each 
+            if [Hierarchy Name] = null and [Extracted Parts] <> null 
+            then 
+                if List.Count([Extracted Parts]) > 0 then [Extracted Parts]{0} else null
+            else 
+                [Hierarchy Name]
     ),
 
     WithFinalValue = Table.AddColumn(
         WithFinalHierarchy,
         "Final Value",
-        each if [Value] = null and [Extracted Parts] <> null
-            then if List.Count([Extracted Parts]) > 1 then [Extracted Parts]{1} else [Extracted Parts]{0}
-            else [Value]
+        each 
+            if [Value] = null and [Extracted Parts] <> null 
+            then 
+                if List.Count([Extracted Parts]) > 1 
+                then [Extracted Parts]{1} 
+                else [Extracted Parts]{0}
+            else 
+                [Value]
     ),
 
     RemovedTemp = Table.RemoveColumns(
         WithFinalValue,
-        {"Hierarchy Name", "Value", "Extracted Parts", "XRP KEY"}
+        {
+            "Hierarchy Name",
+            "Value",
+            "Extracted Parts",
+            "XRP KEY",
+            "TempKeyText"
+        }
     ),
 
     RenamedFinal = Table.RenameColumns(
@@ -87,10 +123,16 @@ let
     WithDimension = Table.AddColumn(
         RenamedFinal,
         "Dimension",
-        each
+        each 
             let
-                matchingRows = Table.SelectRows(Hierarchy_Matrix, (h) => h[Hierarchy Name] = [Hierarchy Name]),
-                dimensionValue = if Table.RowCount(matchingRows) > 0 then matchingRows{0}[Dimension] else null
+                matchingRows = Table.SelectRows(
+                    Hierarchy_Matrix,
+                    (h) => h[Hierarchy Name] = [Hierarchy Name]
+                ),
+                dimensionValue = 
+                    if Table.RowCount(matchingRows) > 0 
+                    then matchingRows{0}[Dimension] 
+                    else null
             in
                 dimensionValue
     ),
@@ -130,6 +172,9 @@ let
         }
     ),
 
-    RemoveMatches = Table.SelectRows(FinalColumns, each [Status] <> "Parent match")
+    RemoveMatches = Table.SelectRows(
+        FinalColumns, 
+        each [Status] <> "Parent match"
+    )
 in
     RemoveMatches
