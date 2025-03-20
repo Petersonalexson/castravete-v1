@@ -37,31 +37,31 @@ let
     
     WithExtractedValues = Table.AddColumn(
         WithConsolidatedKey,
-        "Extracted Value",
+        "Extracted Parts",
         each if [Hierarchy Name] = null and [Consolidated KEY] <> null then
             let
-                keyParts = Text.Split([Consolidated KEY], "/"),
-                finalKey = keyParts{List.Count(keyParts)-1}
+                finalKey = List.Last(Text.Split([Consolidated KEY], "/")),
+                parts = Text.Split(finalKey, " | ")
             in
-                finalKey
+                if List.Count(parts) >= 2 then parts else {finalKey, finalKey}
         else null
     ),
     
     WithFinalHierarchy = Table.AddColumn(
         WithExtractedValues,
         "Final Hierarchy Name",
-        each if [Hierarchy Name] = null then [Extracted Value] else [Hierarchy Name]
+        each if [Hierarchy Name] = null and [Extracted Parts] <> null then [Extracted Parts]{0} else [Hierarchy Name]
     ),
     
     WithFinalValue = Table.AddColumn(
         WithFinalHierarchy,
         "Final Value",
-        each if [Value] = null then [Extracted Value] else [Value]
+        each if [Value] = null and [Extracted Parts] <> null then [Extracted Parts]{1} else [Value]
     ),
     
     RemovedTemp = Table.RemoveColumns(
         WithFinalValue,
-        {"Hierarchy Name", "Value", "Extracted Value", "XRP KEY"}
+        {"Hierarchy Name", "Value", "Extracted Parts", "XRP KEY"}
     ),
     
     RenamedFinal = Table.RenameColumns(
@@ -78,7 +78,7 @@ let
         each 
             let
                 matchingRows = Table.SelectRows(Hierarchy_Matrix, (h) => h[Hierarchy Name] = [Hierarchy Name]),
-                dimensionValue = if Table.RowCount(matchingRows) > 0 then matchingRows{0}[Dimension] else "Unknown Dimension"
+                dimensionValue = if Table.RowCount(matchingRows) > 0 then matchingRows{0}[Dimension] else null
             in
                 dimensionValue
     ),
