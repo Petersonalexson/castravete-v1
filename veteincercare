@@ -40,23 +40,30 @@ let
         "Extracted Parts",
         each if [Hierarchy Name] = null and [Consolidated KEY] <> null then
             let
-                finalKey = List.Last(Text.Split([Consolidated KEY], "/")),
-                parts = Text.Split(finalKey, " | ")
+                keyParts = Text.Split([Consolidated KEY], "/"),
+                finalKey = List.Last(keyParts)
             in
-                if List.Count(parts) >= 2 then parts else {finalKey, finalKey}
+                if Text.Contains(finalKey, " | ") then 
+                    Text.Split(finalKey, " | ")
+                else 
+                    {finalKey, finalKey}
         else null
     ),
     
     WithFinalHierarchy = Table.AddColumn(
         WithExtractedValues,
         "Final Hierarchy Name",
-        each if [Hierarchy Name] = null and [Extracted Parts] <> null then [Extracted Parts]{0} else [Hierarchy Name]
+        each if [Hierarchy Name] = null and [Extracted Parts] <> null then 
+            if List.Count([Extracted Parts]) > 0 then [Extracted Parts]{0} else null
+        else [Hierarchy Name]
     ),
     
     WithFinalValue = Table.AddColumn(
         WithFinalHierarchy,
         "Final Value",
-        each if [Value] = null and [Extracted Parts] <> null then [Extracted Parts]{1} else [Value]
+        each if [Value] = null and [Extracted Parts] <> null then 
+            if List.Count([Extracted Parts]) > 1 then [Extracted Parts]{1} else [Extracted Parts]{0}
+        else [Value]
     ),
     
     RemovedTemp = Table.RemoveColumns(
