@@ -1,5 +1,4 @@
 let
-
     SV_Original = SmartViewData_Comp,
     SVRenamed = Table.RenameColumns(
         SV_Original,
@@ -10,7 +9,6 @@ let
         SVRenamed,
         {"KEY", "Hierarchy Name", "Value", "SmartView Parent", "SmartView Path"}
     ),
-
     XRPOriginal = XRPData_Comp,
     XRPRenamed = Table.RenameColumns(
         XRPOriginal,
@@ -21,7 +19,6 @@ let
         XRPRenamed,
         {"KEY", "XRP Parent", "XRP Path"}
     ),
-
     FullJoin = Table.NestedJoin(
         SVSelected,
         {"KEY"},
@@ -30,88 +27,95 @@ let
         "XRPData",
         JoinKind.FullOuter
     ),
-
     Expanded = Table.ExpandTableColumn(
         FullJoin,
         "XRPData",
         {"KEY", "XRP Parent", "XRP Path"},
         {"XRP KEY", "XRP Parent", "XRP Path"}
     ),
-
-    WithConsolidatedKey = Table.AddColumn(
+    WithNewKey = Table.AddColumn(
         Expanded,
-        "Consolidated KEY",
+        "NewKEY",
         each if [KEY] <> null then [KEY] else [XRP KEY]
     ),
-
-
-    WithTempManipulation = Table.AddColumn(
-        WithConsolidatedKey,
+    RemovedOldKey = Table.RemoveColumns(WithNewKey, {"KEY"}),
+    RenamedKey = Table.RenameColumns(RemovedOldKey, {{"NewKEY", "KEY"}}),
+    WithTempText = Table.AddColumn(
+        RenamedKey,
         "TempKeyText",
-        each 
-            if [Hierarchy Name] = null and [Consolidated KEY] <> null 
-            then
+        each
+            if [Hierarchy Name] = null and [KEY] <> null then
                 let
-                    rawSplit = Text.Split([Consolidated KEY], "/"),
+                    rawSplit = Text.Split([KEY], "/"),
                     lastSegment = List.Last(rawSplit)
                 in
-                    lastSegment
+                    Text.Trim(lastSegment)
             else
                 null
     ),
-
     WithExtractedValues = Table.AddColumn(
-        WithTempManipulation,
+        WithTempText,
         "Extracted Parts",
-        each 
+        each
             if [Hierarchy Name] = null and [TempKeyText] <> null then
                 let
-                    finalKey = [TempKeyText],
-                    splitted = 
-                        if Text.Contains(finalKey, " | ") 
-                        then Text.Split(finalKey, " | ")
-                        else {finalKey, finalKey}
+                    txt = Text.Trim([TempKeyText]),
+                    replaced = Text.Replace(txt, " | ", "|"),
+                    splitted = Text.Split(replaced, "|"),
+                    splittedCount = List.Count(splitted)
                 in
-                    splitted
+                    if splittedCount = 2 then
+                        {
+                            Text.Trim(splitted{0}),
+                            Text.Trim(splitted{1})
+                        }
+                    else
+                        {
+                            txt,
+                            txt
+                        }
             else
                 null
     ),
-
     WithFinalHierarchy = Table.AddColumn(
         WithExtractedValues,
         "Final Hierarchy Name",
-        each 
-            if [Hierarchy Name] = null and [Extracted Parts] <> null 
-            then 
-                if List.Count([Extracted Parts]) > 0 then [Extracted Parts]{0} else null
-            else 
+        each
+            if [Hierarchy Name] = null and [Extracted Parts] <> null then
+                let
+                    parts = [Extracted Parts]
+                in
+                    if List.Count(parts) > 0 
+                    then parts{0} 
+                    else null
+            else
                 [Hierarchy Name]
     ),
-
     WithFinalValue = Table.AddColumn(
         WithFinalHierarchy,
         "Final Value",
-        each 
-            if [Value] = null and [Extracted Parts] <> null 
-            then 
-                if List.Count([Extracted Parts]) > 1 
-                then [Extracted Parts]{1} 
-                else [Extracted Parts]{0}
-            else 
+        each
+            if [Value] = null and [Extracted Parts] <> null then
+                let
+                    parts = [Extracted Parts],
+                    partsCount = List.Count(parts)
+                in
+                    if partsCount > 1 
+                    then parts{1} 
+                    else parts{0}
+            else
                 [Value]
     ),
-
     RemovedTemp = Table.RemoveColumns(
         WithFinalValue,
         {
             "Hierarchy Name",
             "Value",
             "Extracted Parts",
-            "XRP KEY",
-            "TempKeyText"
+            "TempKeyText",
+            "XRP KEY"
         }
     ),
-
     RenamedFinal = Table.RenameColumns(
         RemovedTemp,
         {
@@ -119,11 +123,10 @@ let
             {"Final Value", "Value"}
         }
     ),
-
     WithDimension = Table.AddColumn(
         RenamedFinal,
         "Dimension",
-        each 
+        each
             let
                 matchingRows = Table.SelectRows(
                     Hierarchy_Matrix,
@@ -136,7 +139,6 @@ let
             in
                 dimensionValue
     ),
-
     WithStatus = Table.AddColumn(
         WithDimension,
         "Status",
@@ -156,11 +158,10 @@ let
                 else
                     "Parent match"
     ),
-
     FinalColumns = Table.SelectColumns(
         WithStatus,
         {
-            "Consolidated KEY",
+            "KEY",
             "Hierarchy Name",
             "Value",
             "SmartView Parent",
@@ -171,10 +172,6 @@ let
             "Dimension"
         }
     ),
-
-    RemoveMatches = Table.SelectRows(
-        FinalColumns, 
-        each [Status] <> "Parent match"
-    )
+    RemoveMatches = Table.SelectRows(FinalColumns, each [Status] <> "Parent match")
 in
     RemoveMatches
