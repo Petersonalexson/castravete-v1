@@ -1,5 +1,4 @@
 let
-
     SV_Original = SViewData_Comp,
     SVRenamed = Table.RenameColumns(SV_Original, {{"Parent", "SView Parent"}}),
     SVSelected = Table.SelectColumns(
@@ -19,7 +18,6 @@ let
         {"KEY", "XRP Parent", "XRP Path"}
     ),
     
-
     FullJoin = Table.NestedJoin(
         SVSelected, {"KEY"}, XRPSelected, {"KEY"}, "XRPData", JoinKind.FullOuter
     ),
@@ -27,40 +25,55 @@ let
     Expanded = Table.ExpandTableColumn(
         FullJoin,
         "XRPData", 
-        {"XRP Parent", "XRP Path"}, 
-        {"XRP Parent", "XRP Path"}
+        {"KEY", "XRP Parent", "XRP Path"}, 
+        {"XRP KEY", "XRP Parent", "XRP Path"}
     ),
     
-    MissingHierarchy = Table.SelectRows(Expanded, each [Hierarchy Name] = null),
+    WithConsolidatedKey = Table.AddColumn(
+        Expanded,
+        "Consolidated KEY",
+        each if [KEY] <> null then [KEY] else [XRP KEY]
+    ),
     
-    WithExtractedKey = Table.AddColumn(
-        MissingHierarchy,
-        "Extracted Key",
-        each if [KEY] <> null then 
+    WithExtractedValues = Table.AddColumn(
+        WithConsolidatedKey,
+        "Extracted Value",
+        each if [Hierarchy Name] = null and [Consolidated KEY] <> null then
             let
-                keyParts = Text.Split([KEY], "/"),
+                keyParts = Text.Split([Consolidated KEY], "/"),
                 finalKey = keyParts{List.Count(keyParts)-1}
             in
                 finalKey
-        else "Unknown"  
+        else null
     ),
-
-    UpdatedMissing = Table.TransformColumns(
-        WithExtractedKey,
+    
+    WithFinalHierarchy = Table.AddColumn(
+        WithExtractedValues,
+        "Final Hierarchy Name",
+        each if [Hierarchy Name] = null then [Extracted Value] else [Hierarchy Name]
+    ),
+    
+    WithFinalValue = Table.AddColumn(
+        WithFinalHierarchy,
+        "Final Value",
+        each if [Value] = null then [Extracted Value] else [Value]
+    ),
+    
+    RemovedTemp = Table.RemoveColumns(
+        WithFinalValue,
+        {"Hierarchy Name", "Value", "Extracted Value", "XRP KEY"}
+    ),
+    
+    RenamedFinal = Table.RenameColumns(
+        RemovedTemp,
         {
-            {"Hierarchy Name", each [Extracted Key]},
-            {"Value", each [Extracted Key]}
+            {"Final Hierarchy Name", "Hierarchy Name"},
+            {"Final Value", "Value"}
         }
     ),
     
-    CleanedMissing = Table.RemoveColumns(UpdatedMissing, {"Extracted Key"}),
-    
-    NonMissingRows = Table.SelectRows(Expanded, each [Hierarchy Name] <> null),
-    
-    CombinedTable = Table.Combine({NonMissingRows, CleanedMissing}),
-    
     WithDimension = Table.AddColumn(
-        CombinedTable,
+        RenamedFinal,
         "Dimension",
         each 
             let
@@ -88,7 +101,7 @@ let
     FinalColumns = Table.SelectColumns(
         WithStatus,
         {
-            "KEY",
+            "Consolidated KEY",
             "Hierarchy Name",
             "Value",
             "SView Parent", 
