@@ -1,40 +1,44 @@
 let
-    SV_Original = SViewData_Comp,
-    SVRenamed = Table.RenameColumns(SV_Original, {{"Parent", "SView Parent"}}),
+    SV_Original = SmartViewData_Comp,
+    SVRenamed = Table.RenameColumns(SV_Original, {{"Parent", "SmartView Parent"}}),
     SVSelected = Table.SelectColumns(
         SVRenamed,
-        {"KEY", "Hierarchy Name", "Value", "SView Parent", "SView Path"}
+        {"KEY", "Hierarchy Name", "Value", "SmartView Parent", "SmartView Path"}
     ),
-    
+
     XRPOriginal = XRPData_Comp,
     XRPRenamed = Table.RenameColumns(
         XRPOriginal,
         {{"Parent", "XRP Parent"}},
         MissingField.Ignore
     ),
-    
     XRPSelected = Table.SelectColumns(
         XRPRenamed,
         {"KEY", "XRP Parent", "XRP Path"}
     ),
-    
+
     FullJoin = Table.NestedJoin(
-        SVSelected, {"KEY"}, XRPSelected, {"KEY"}, "XRPData", JoinKind.FullOuter
+        SVSelected,
+        {"KEY"},
+        XRPSelected,
+        {"KEY"},
+        "XRPData",
+        JoinKind.FullOuter
     ),
-    
+
     Expanded = Table.ExpandTableColumn(
         FullJoin,
-        "XRPData", 
-        {"KEY", "XRP Parent", "XRP Path"}, 
+        "XRPData",
+        {"KEY", "XRP Parent", "XRP Path"},
         {"XRP KEY", "XRP Parent", "XRP Path"}
     ),
-    
+
     WithConsolidatedKey = Table.AddColumn(
         Expanded,
         "Consolidated KEY",
         each if [KEY] <> null then [KEY] else [XRP KEY]
     ),
-    
+
     WithExtractedValues = Table.AddColumn(
         WithConsolidatedKey,
         "Extracted Parts",
@@ -43,34 +47,35 @@ let
                 keyParts = Text.Split([Consolidated KEY], "/"),
                 finalKey = List.Last(keyParts)
             in
-                if Text.Contains(finalKey, " | ") then 
+                if Text.Contains(finalKey, " | ") then
                     Text.Split(finalKey, " | ")
-                else 
+                else
                     {finalKey, finalKey}
-        else null
+        else
+            null
     ),
-    
+
     WithFinalHierarchy = Table.AddColumn(
         WithExtractedValues,
         "Final Hierarchy Name",
-        each if [Hierarchy Name] = null and [Extracted Parts] <> null then 
-            if List.Count([Extracted Parts]) > 0 then [Extracted Parts]{0} else null
-        else [Hierarchy Name]
+        each if [Hierarchy Name] = null and [Extracted Parts] <> null
+            then if List.Count([Extracted Parts]) > 0 then [Extracted Parts]{0} else null
+            else [Hierarchy Name]
     ),
-    
+
     WithFinalValue = Table.AddColumn(
         WithFinalHierarchy,
         "Final Value",
-        each if [Value] = null and [Extracted Parts] <> null then 
-            if List.Count([Extracted Parts]) > 1 then [Extracted Parts]{1} else [Extracted Parts]{0}
-        else [Value]
+        each if [Value] = null and [Extracted Parts] <> null
+            then if List.Count([Extracted Parts]) > 1 then [Extracted Parts]{1} else [Extracted Parts]{0}
+            else [Value]
     ),
-    
+
     RemovedTemp = Table.RemoveColumns(
         WithFinalValue,
         {"Hierarchy Name", "Value", "Extracted Parts", "XRP KEY"}
     ),
-    
+
     RenamedFinal = Table.RenameColumns(
         RemovedTemp,
         {
@@ -78,48 +83,53 @@ let
             {"Final Value", "Value"}
         }
     ),
-    
+
     WithDimension = Table.AddColumn(
         RenamedFinal,
         "Dimension",
-        each 
+        each
             let
                 matchingRows = Table.SelectRows(Hierarchy_Matrix, (h) => h[Hierarchy Name] = [Hierarchy Name]),
                 dimensionValue = if Table.RowCount(matchingRows) > 0 then matchingRows{0}[Dimension] else null
             in
                 dimensionValue
     ),
-    
+
     WithStatus = Table.AddColumn(
         WithDimension,
         "Status",
         each
             let
-                svP = if [SView Parent] = null then "" else [SView Parent],
+                svP = if [SmartView Parent] = null then "" else [SmartView Parent],
                 xrpP = if [XRP Parent] = null then "" else [XRP Parent]
             in
-                if svP = "" and xrpP = "" then "Parent match"
-                else if svP = "" and xrpP <> "" then "Missing in SView"
-                else if svP <> "" and xrpP = "" then "Missing in XRP"
-                else if svP <> xrpP then "Parent mismatch"
-                else "Parent match"
+                if svP = "" and xrpP = "" then
+                    "Parent match"
+                else if svP = "" and xrpP <> "" then
+                    "Missing in SmartView"
+                else if svP <> "" and xrpP = "" then
+                    "Missing in XRP"
+                else if svP <> xrpP then
+                    "Parent mismatch"
+                else
+                    "Parent match"
     ),
-    
+
     FinalColumns = Table.SelectColumns(
         WithStatus,
         {
             "Consolidated KEY",
             "Hierarchy Name",
             "Value",
-            "SView Parent", 
+            "SmartView Parent",
             "XRP Parent",
             "Status",
-            "SView Path",
+            "SmartView Path",
             "XRP Path",
             "Dimension"
         }
     ),
-    
+
     RemoveMatches = Table.SelectRows(FinalColumns, each [Status] <> "Parent match")
 in
     RemoveMatches
