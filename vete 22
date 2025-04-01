@@ -1,14 +1,7 @@
 Option Explicit
 
-' Procedure to write to process log
-Public Sub WriteProcessLog(ByRef wsProcessLog As Worksheet, ByVal Msg As String)
-    Dim nextLogRow As Long
-    nextLogRow = wsProcessLog.Cells(wsProcessLog.Rows.Count, "A").End(xlUp).Row + 1
-    wsProcessLog.Cells(nextLogRow, 1).Value = Now
-    wsProcessLog.Cells(nextLogRow, 2).Value = Msg
-End Sub
-
-Public Sub PopulateFuture_5Blocks_WithProcessLog()
+' Main procedure
+Sub PopulateFuture_5Blocks_WithProcessLog()
     ' Main workbook and worksheets
     Dim wb As Workbook
     Set wb = ThisWorkbook
@@ -28,6 +21,9 @@ Public Sub PopulateFuture_5Blocks_WithProcessLog()
     Dim SubName As String
     Dim XAVSheetName As String
     Dim cornerCells As Variant
+    
+    ' Write to the process log
+    Dim nextLogRow As Long
     
     ' Loop counters
     Dim i As Long
@@ -101,10 +97,16 @@ Public Sub PopulateFuture_5Blocks_WithProcessLog()
     
     ' Start macro
     SubName = "PopulateFuture_5Blocks_WithProcessLog"
-    Call WriteProcessLog(wsProcessLog, SubName & ": Started macro.")
+    
+    ' Write to process log
+    nextLogRow = wsProcessLog.Cells(wsProcessLog.Rows.Count, "A").End(xlUp).Row + 1
+    wsProcessLog.Cells(nextLogRow, 1).Value = Now
+    wsProcessLog.Cells(nextLogRow, 2).Value = SubName & ": Started macro."
     
     ' Clear existing data in FUTURE sheet cells that might be populated
-    Call WriteProcessLog(wsProcessLog, "Clearing existing data in target FUTURE cells...")
+    nextLogRow = wsProcessLog.Cells(wsProcessLog.Rows.Count, "A").End(xlUp).Row + 1
+    wsProcessLog.Cells(nextLogRow, 1).Value = Now
+    wsProcessLog.Cells(nextLogRow, 2).Value = "Clearing existing data in target FUTURE cells..."
     cornerCells = Array("C6", "C22", "C38", "C54", "C70")
     
     For idx = LBound(cornerCells) To UBound(cornerCells)
@@ -133,7 +135,9 @@ Public Sub PopulateFuture_5Blocks_WithProcessLog()
             ' Clear data area (but not headers)
             If lastRow >= startRow And lastCol >= startCol Then
                 wsFuture.Range(wsFuture.Cells(startRow, startCol), wsFuture.Cells(lastRow, lastCol)).ClearContents
-                Call WriteProcessLog(wsProcessLog, "Cleared data for CC block at " & cellRef)
+                nextLogRow = wsProcessLog.Cells(wsProcessLog.Rows.Count, "A").End(xlUp).Row + 1
+                wsProcessLog.Cells(nextLogRow, 1).Value = Now
+                wsProcessLog.Cells(nextLogRow, 2).Value = "Cleared data for CC block at " & cellRef
             End If
         End If
     Next idx
