@@ -9,63 +9,98 @@ Private Sub WriteProcessLog(ByRef wsProcessLog As Worksheet, ByVal Msg As String
 End Sub
 
 Sub PopulateFuture_5Blocks_WithProcessLog()
+    ' Main workbook and worksheets
     Dim wb As Workbook: Set wb = ThisWorkbook
     Dim wsGenerate As Worksheet: Set wsGenerate = wb.Sheets("Generate")
-    Dim wsAcctMap As Worksheet:  Set wsAcctMap = wb.Sheets("Account Mapping")
-    Dim wsFuture As Worksheet:   Set wsFuture = wb.Sheets("FUTURE")
+    Dim wsAcctMap As Worksheet: Set wsAcctMap = wb.Sheets("Account Mapping")
+    Dim wsFuture As Worksheet: Set wsFuture = wb.Sheets("FUTURE")
     Dim wsProcessLog As Worksheet: Set wsProcessLog = wb.Sheets("ProcessLog")
+    Dim wsXAV As Worksheet
     
     Dim SubName As String
     SubName = "PopulateFuture_5Blocks_WithProcessLog"
     
+    ' Variables for loops and indexes
+    Dim i As Long, k As Long, idx As Long
+    Dim rowXAV As Long, rowXAV2 As Long
+    Dim colPtr As Long, rowPtr As Long
+    Dim startRow As Long, startCol As Long
+    Dim lastRow As Long, lastCol As Long
+    Dim targetRow As Long, targetCol As Long
+    Dim lastRowAcct As Long, lastRowXAV As Long, lastRowPeriodMap As Long, lastRowDescMap As Long
+    Dim startDescMapRow As Long
+    
+    ' Variables for cell values and locations
+    Dim cellRef As String
+    Dim blockCC As Variant, voiceNum As Variant, costCenter As Variant
+    Dim acctVal As Variant, reportDescVal As Variant, accountVal As Variant
+    Dim amountVal As Variant, repDescVal As Variant, thisPeriod As Variant
+    Dim xavPeriod As Variant, futureCol As Variant
+    Dim desc2Val As Variant, futureDesc As Variant, periodVal As Variant
+    Dim desc2 As Variant, descVal As Variant, existingVal As Variant, cellVal As Variant
+    
+    ' Variables for calculations
+    Dim bonusTotal As Double, rowTotal As Double, colTotal As Double, grandTotal As Double, totalVal As Double
+    
+    ' Variables for collections, keys and arrays
+    Dim cornerCells As Variant
+    Dim key As String, ccKey As String, repDescKey As String, xavPeriodKey As String, futurePeriodKey As String
+    Dim parts() As String, arrKeys As Variant
+    Dim XAVSheetName As String
+    
+    ' Dictionary objects
+    Dim dictAccountMap As Object
+    Dim dictPeriodMap As Object
+    Dim dictDescMap As Object
+    Dim dictFinalDescMap As Object
+    Dim dictResults As Object
+    Dim dictProcessed As Object
+    Dim dictPeriodToCol As Object
+    Dim dictDescToRow As Object
+    
+    ' Start macro
     Call WriteProcessLog(wsProcessLog, SubName & ": Started macro.")
     
     ' Clear existing data in FUTURE sheet cells that might be populated
     Call WriteProcessLog(wsProcessLog, "Clearing existing data in target FUTURE cells...")
-    Dim cornerCells As Variant
     cornerCells = Array("C6", "C22", "C38", "C54", "C70")
-    Dim idx As Long
+    
     For idx = LBound(cornerCells) To UBound(cornerCells)
-        Dim cellRef As String
         cellRef = cornerCells(idx)
         Dim rngCorner As Range
         Set rngCorner = wsFuture.Range(cellRef)
         
         If Not IsEmpty(rngCorner.Value) Then
             ' Find the range to clear
-            Dim startRow As Long, startCol As Long
-            Dim endRow As Long, endCol As Long
             startRow = rngCorner.Row + 1
             startCol = rngCorner.Column + 1
             
             ' Find endRow
-            endRow = startRow
-            Do While Not IsEmpty(wsFuture.Cells(endRow, rngCorner.Column).Value)
-                endRow = endRow + 1
+            lastRow = startRow
+            Do While Not IsEmpty(wsFuture.Cells(lastRow, rngCorner.Column).Value)
+                lastRow = lastRow + 1
             Loop
-            endRow = endRow - 1
+            lastRow = lastRow - 1
             
             ' Find endCol
-            endCol = startCol
-            Do While Not IsEmpty(wsFuture.Cells(rngCorner.Row, endCol).Value)
-                endCol = endCol + 1
+            lastCol = startCol
+            Do While Not IsEmpty(wsFuture.Cells(rngCorner.Row, lastCol).Value)
+                lastCol = lastCol + 1
             Loop
-            endCol = endCol - 1
+            lastCol = lastCol - 1
             
             ' Clear data area (but not headers)
-            If endRow >= startRow And endCol >= startCol Then
-                wsFuture.Range(wsFuture.Cells(startRow, startCol), wsFuture.Cells(endRow, endCol)).ClearContents
+            If lastRow >= startRow And lastCol >= startCol Then
+                wsFuture.Range(wsFuture.Cells(startRow, startCol), wsFuture.Cells(lastRow, lastCol)).ClearContents
                 Call WriteProcessLog(wsProcessLog, "Cleared data for CC block at " & cellRef)
             End If
         End If
     Next idx
     
     ' Get XAV sheet name from Generate sheet
-    Dim XAVSheetName As String
     XAVSheetName = CStr(wsGenerate.Range("D7").Value)
     
     ' Locate XAV sheet
-    Dim wsXAV As Worksheet
     On Error Resume Next
     Set wsXAV = wb.Sheets(XAVSheetName)
     On Error GoTo 0
@@ -100,17 +135,12 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     ' Read Account Mapping (NAT Account --> Report Description)
     Call WriteProcessLog(wsProcessLog, "Reading 'Account Mapping' for Account --> Report Description...")
     
-    Dim dictAccountMap As Object
     Set dictAccountMap = CreateObject("Scripting.Dictionary")
     dictAccountMap.CompareMode = vbTextCompare
     
-    Dim lastRowAcct As Long
     With wsAcctMap
         lastRowAcct = .Cells(.Rows.Count, "B").End(xlUp).Row
-        Dim i As Long
         For i = 2 To lastRowAcct
-            Dim acctVal As Variant
-            Dim reportDescVal As Variant
             acctVal = .Range("B" & i).Value
             reportDescVal = .Range("D" & i).Value
             If Not IsEmpty(acctVal) And Not IsEmpty(reportDescVal) Then
@@ -126,17 +156,13 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     ' Read reference mapping for XAV period to FUTURE column
     Call WriteProcessLog(wsProcessLog, "Reading period reference mapping...")
     
-    Dim dictPeriodMap As Object
     Set dictPeriodMap = CreateObject("Scripting.Dictionary")
     dictPeriodMap.CompareMode = vbTextCompare
     
-    Dim lastRowPeriodMap As Long
     lastRowPeriodMap = wsAcctMap.Cells(wsAcctMap.Rows.Count, "F").End(xlUp).Row
     
     For i = 2 To lastRowPeriodMap
         If Not IsEmpty(wsAcctMap.Range("F" & i).Value) And Not IsEmpty(wsAcctMap.Range("C" & i).Value) Then
-            Dim xavPeriod As Variant
-            Dim futureCol As Variant
             xavPeriod = wsAcctMap.Range("F" & i).Value
             futureCol = wsAcctMap.Range("C" & i).Value
             If Not dictPeriodMap.Exists(xavPeriod) Then
@@ -150,20 +176,15 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     ' Read description mapping (Description 2 to FUTURE Description)
     Call WriteProcessLog(wsProcessLog, "Reading description mapping...")
     
-    Dim dictDescMap As Object
     Set dictDescMap = CreateObject("Scripting.Dictionary")
     dictDescMap.CompareMode = vbTextCompare
     
-    Dim lastRowDescMap As Long
     lastRowDescMap = wsAcctMap.Cells(wsAcctMap.Rows.Count, "B").End(xlUp).Row
     
-    Dim startDescMapRow As Long
     startDescMapRow = 15  ' B15 as mentioned
     
     For i = startDescMapRow To lastRowDescMap
         If Not IsEmpty(wsAcctMap.Range("B" & i).Value) And Not IsEmpty(wsAcctMap.Range("C" & i).Value) Then
-            Dim desc2Val As Variant
-            Dim futureDesc As Variant
             desc2Val = wsAcctMap.Range("B" & i).Value
             futureDesc = wsAcctMap.Range("C" & i).Value
             If Not dictDescMap.Exists(desc2Val) Then
@@ -175,13 +196,10 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     Call WriteProcessLog(wsProcessLog, "Description mapping loaded. Total mappings: " & dictDescMap.Count)
     
     ' Create final mapping dictionary (Account to FUTURE Description)
-    Dim dictFinalDescMap As Object
     Set dictFinalDescMap = CreateObject("Scripting.Dictionary")
     dictFinalDescMap.CompareMode = vbTextCompare
     
-    Dim acctVal As Variant
     For Each acctVal In dictAccountMap.Keys
-        Dim desc2 As Variant
         desc2 = dictAccountMap(acctVal)
         
         If dictDescMap.Exists(desc2) Then
@@ -194,21 +212,16 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     
     Call WriteProcessLog(wsProcessLog, "Starting XAV summation with bonus logic...")
     
-    Dim lastRowXAV As Long
     lastRowXAV = wsXAV.Cells(wsXAV.Rows.Count, "A").End(xlUp).Row
     
-    Dim dictResults As Object
     Set dictResults = CreateObject("Scripting.Dictionary")
     dictResults.CompareMode = vbTextCompare
     
-    Dim dictProcessed As Object
     Set dictProcessed = CreateObject("Scripting.Dictionary")
     dictProcessed.CompareMode = vbTextCompare
     
     ' Process XAV data
-    Dim rowXAV As Long
     For rowXAV = 2 To lastRowXAV
-        Dim voiceNum As Variant
         voiceNum = wsXAV.Range("N" & rowXAV).Value
         
         ' Skip if already processed this voice number
@@ -216,12 +229,9 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
             dictProcessed.Add voiceNum, True
             
             ' Calculate sum for this voice number
-            Dim bonusTotal As Double
             bonusTotal = 0
-            Dim rowXAV2 As Long
             For rowXAV2 = 2 To lastRowXAV
                 If wsXAV.Range("N" & rowXAV2).Value = voiceNum Then
-                    Dim amountVal As Variant
                     amountVal = wsXAV.Range("O" & rowXAV2).Value
                     ' Ensure numeric value before adding
                     If IsNumeric(amountVal) Then
@@ -230,13 +240,10 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
                 End If
             Next rowXAV2
             
-            Dim costCenter As Variant
             costCenter = wsXAV.Range("E" & rowXAV).Value
             
-            Dim accountVal As Variant
             accountVal = wsXAV.Range("C" & rowXAV).Value
             
-            Dim repDescVal As Variant
             If dictFinalDescMap.Exists(accountVal) Then
                 repDescVal = dictFinalDescMap(accountVal)
             Else
@@ -244,7 +251,6 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
                 GoTo SkipVoiceNum
             End If
             
-            Dim thisPeriod As Variant
             thisPeriod = wsXAV.Range("A" & rowXAV).Value
             
             ' Check if period exists in period mapping
@@ -253,7 +259,6 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
                 GoTo SkipVoiceNum
             End If
             
-            Dim key As String
             key = CStr(costCenter) & "||" & CStr(repDescVal) & "||" & CStr(thisPeriod)
             
             If dictResults.Exists(key) Then
@@ -275,7 +280,6 @@ SkipVoiceNum:
     For idx = LBound(cornerCells) To UBound(cornerCells)
         cellRef = cornerCells(idx)
         Set rngCorner = wsFuture.Range(cellRef)
-        Dim blockCC As Variant
         blockCC = rngCorner.Value
         
         If IsEmpty(blockCC) Then
@@ -286,17 +290,13 @@ SkipVoiceNum:
         Call WriteProcessLog(wsProcessLog, "Processing block corner " & cellRef & " => CC=" & blockCC)
         
         ' Map periods to columns
-        Dim dictPeriodToCol As Object
         Set dictPeriodToCol = CreateObject("Scripting.Dictionary")
         dictPeriodToCol.CompareMode = vbTextCompare
         
-        Dim startCol As Long
         startCol = rngCorner.Column + 1
-        Dim colPtr As Long
         colPtr = startCol
         
         Do While Not IsEmpty(wsFuture.Cells(rngCorner.Row, colPtr).Value)
-            Dim periodVal As Variant
             periodVal = wsFuture.Cells(rngCorner.Row, colPtr).Value
             dictPeriodToCol(CStr(periodVal)) = colPtr
             colPtr = colPtr + 1
@@ -305,17 +305,13 @@ SkipVoiceNum:
         Call WriteProcessLog(wsProcessLog, "Found " & dictPeriodToCol.Count & " period(s) to the right of " & cellRef)
         
         ' Map descriptions to rows
-        Dim dictDescToRow As Object
         Set dictDescToRow = CreateObject("Scripting.Dictionary")
         dictDescToRow.CompareMode = vbTextCompare
         
-        Dim startRow As Long
         startRow = rngCorner.Row + 1
-        Dim rowPtr As Long
         rowPtr = startRow
         
         Do While Not IsEmpty(wsFuture.Cells(rowPtr, rngCorner.Column).Value)
-            Dim descVal As Variant
             descVal = wsFuture.Cells(rowPtr, rngCorner.Column).Value
             dictDescToRow(CStr(descVal)) = rowPtr
             rowPtr = rowPtr + 1
@@ -324,24 +320,17 @@ SkipVoiceNum:
         Call WriteProcessLog(wsProcessLog, "Found " & dictDescToRow.Count & " Report Description(s) below " & cellRef)
         
         ' Populate FUTURE cells from results dictionary
-        Dim arrKeys As Variant
         arrKeys = dictResults.keys
-        Dim k As Long
         For k = LBound(arrKeys) To UBound(arrKeys)
-            Dim parts() As String
             parts = Split(arrKeys(k), "||")
-            Dim ccKey As String
             ccKey = parts(0)
             
             ' Check if this entry belongs to current CC block
             If ccKey = CStr(blockCC) Then
-                Dim repDescKey As String
                 repDescKey = parts(1)
-                Dim xavPeriodKey As String
                 xavPeriodKey = parts(2)
                 
                 ' Get mapped period for FUTURE
-                Dim futurePeriodKey As String
                 If dictPeriodMap.Exists(xavPeriodKey) Then
                     futurePeriodKey = dictPeriodMap(xavPeriodKey)
                 Else
@@ -351,15 +340,11 @@ SkipVoiceNum:
                 
                 ' Check if we have a matching row and column
                 If dictDescToRow.Exists(repDescKey) And dictPeriodToCol.Exists(futurePeriodKey) Then
-                    Dim targetRow As Long
                     targetRow = dictDescToRow(repDescKey)
-                    Dim targetCol As Long
                     targetCol = dictPeriodToCol(futurePeriodKey)
-                    Dim totalVal As Double
                     totalVal = dictResults(arrKeys(k))
                     
                     ' Add to existing value if there's already a value
-                    Dim existingVal As Variant
                     existingVal = wsFuture.Cells(targetRow, targetCol).Value
                     If IsNumeric(existingVal) Then
                         wsFuture.Cells(targetRow, targetCol).Value = CDbl(existingVal) + totalVal
@@ -392,7 +377,6 @@ NextCorner:
         colPtr = startCol
         
         ' Find the boundaries
-        Dim lastRow As Long, lastCol As Long
         lastRow = startRow
         Do While Not IsEmpty(wsFuture.Cells(lastRow, rngCorner.Column).Value)
             lastRow = lastRow + 1
@@ -407,11 +391,9 @@ NextCorner:
         
         ' Add row totals
         For rowPtr = startRow To lastRow
-            Dim rowTotal As Double
             rowTotal = 0
             
             For colPtr = startCol To lastCol
-                Dim cellVal As Variant
                 cellVal = wsFuture.Cells(rowPtr, colPtr).Value
                 
                 If IsNumeric(cellVal) Then
@@ -427,7 +409,6 @@ NextCorner:
         
         ' Add column totals
         For colPtr = startCol To lastCol
-            Dim colTotal As Double
             colTotal = 0
             
             For rowPtr = startRow To lastRow
@@ -447,7 +428,6 @@ NextCorner:
         ' Grand total if both total row and column exist
         If Not IsEmpty(wsFuture.Cells(lastRow + 1, rngCorner.Column).Value) And _
            Not IsEmpty(wsFuture.Cells(rngCorner.Row, lastCol + 1).Value) Then
-            Dim grandTotal As Double
             grandTotal = 0
             
             For rowPtr = startRow To lastRow
