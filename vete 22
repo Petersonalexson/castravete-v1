@@ -33,7 +33,7 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     ' Variables for cell values and locations
     Dim cellRef As String
     Dim blockCC As Variant, voiceNum As Variant, costCenter As Variant
-    Dim acctVal As Variant, reportDescVal As Variant, accountVal As Variant
+    Dim reportDescVal As Variant, accountVal As Variant
     Dim amountVal As Variant, repDescVal As Variant, thisPeriod As Variant
     Dim xavPeriod As Variant, futureCol As Variant
     Dim desc2Val As Variant, futureDesc As Variant, periodVal As Variant
