@@ -1,52 +1,92 @@
 Option Explicit
 
 ' Procedure to write to process log
-Private Sub WriteProcessLog(ByRef wsProcessLog As Worksheet, ByVal Msg As String)
+Public Sub WriteProcessLog(ByRef wsProcessLog As Worksheet, ByVal Msg As String)
     Dim nextLogRow As Long
     nextLogRow = wsProcessLog.Cells(wsProcessLog.Rows.Count, "A").End(xlUp).Row + 1
     wsProcessLog.Cells(nextLogRow, 1).Value = Now
     wsProcessLog.Cells(nextLogRow, 2).Value = Msg
 End Sub
 
-Sub PopulateFuture_5Blocks_WithProcessLog()
+Public Sub PopulateFuture_5Blocks_WithProcessLog()
     ' Main workbook and worksheets
-    Dim wb As Workbook: Set wb = ThisWorkbook
-    Dim wsGenerate As Worksheet: Set wsGenerate = wb.Sheets("Generate")
-    Dim wsAcctMap As Worksheet: Set wsAcctMap = wb.Sheets("Account Mapping")
-    Dim wsFuture As Worksheet: Set wsFuture = wb.Sheets("FUTURE")
-    Dim wsProcessLog As Worksheet: Set wsProcessLog = wb.Sheets("ProcessLog")
+    Dim wb As Workbook
+    Set wb = ThisWorkbook
+    
+    Dim wsGenerate As Worksheet
+    Dim wsAcctMap As Worksheet
+    Dim wsFuture As Worksheet
+    Dim wsProcessLog As Worksheet
     Dim wsXAV As Worksheet
     
-    Dim SubName As String
-    SubName = "PopulateFuture_5Blocks_WithProcessLog"
+    Set wsGenerate = wb.Sheets("Generate")
+    Set wsAcctMap = wb.Sheets("Account Mapping")
+    Set wsFuture = wb.Sheets("FUTURE")
+    Set wsProcessLog = wb.Sheets("ProcessLog")
     
-    ' Variables for loops and indexes
-    Dim i As Long, k As Long, idx As Long
-    Dim rowXAV As Long, rowXAV2 As Long
-    Dim colPtr As Long, rowPtr As Long
-    Dim startRow As Long, startCol As Long
-    Dim lastRow As Long, lastCol As Long
-    Dim targetRow As Long, targetCol As Long
-    Dim lastRowAcct As Long, lastRowXAV As Long, lastRowPeriodMap As Long, lastRowDescMap As Long
+    ' Variables for storing data
+    Dim SubName As String
+    Dim XAVSheetName As String
+    Dim cornerCells As Variant
+    
+    ' Loop counters
+    Dim i As Long
+    Dim k As Long
+    Dim idx As Long
+    Dim rowXAV As Long
+    Dim rowXAV2 As Long
+    Dim colPtr As Long
+    Dim rowPtr As Long
+    
+    ' Row/Column positions
+    Dim startRow As Long
+    Dim startCol As Long
+    Dim lastRow As Long
+    Dim lastCol As Long
+    Dim targetRow As Long
+    Dim targetCol As Long
+    Dim lastRowAcct As Long
+    Dim lastRowXAV As Long
+    Dim lastRowPeriodMap As Long
+    Dim lastRowDescMap As Long
     Dim startDescMapRow As Long
     
-    ' Variables for cell values and locations
+    ' Cell values
     Dim cellRef As String
-    Dim blockCC As Variant, voiceNum As Variant, costCenter As Variant
-    Dim reportDescVal As Variant, accountVal As Variant, acctVal As Variant
-    Dim amountVal As Variant, repDescVal As Variant, thisPeriod As Variant
-    Dim xavPeriod As Variant, futureCol As Variant
-    Dim desc2Val As Variant, futureDesc As Variant, periodVal As Variant
-    Dim desc2 As Variant, descVal As Variant, existingVal As Variant, cellVal As Variant
+    Dim blockCC As Variant
+    Dim voiceNum As Variant
+    Dim costCenter As Variant
+    Dim acctVal As Variant
+    Dim reportDescVal As Variant
+    Dim accountVal As Variant
+    Dim amountVal As Variant
+    Dim repDescVal As Variant
+    Dim thisPeriod As Variant
+    Dim xavPeriod As Variant
+    Dim futureCol As Variant
+    Dim desc2Val As Variant
+    Dim futureDesc As Variant
+    Dim periodVal As Variant
+    Dim desc2 As Variant
+    Dim descVal As Variant
+    Dim existingVal As Variant
+    Dim cellVal As Variant
     
-    ' Variables for calculations
-    Dim bonusTotal As Double, rowTotal As Double, colTotal As Double, grandTotal As Double, totalVal As Double
+    ' Calculation values
+    Dim bonusTotal As Double
+    Dim rowTotal As Double
+    Dim colTotal As Double
+    Dim grandTotal As Double
+    Dim totalVal As Double
     
-    ' Variables for collections, keys and arrays
-    Dim cornerCells As Variant
-    Dim key As String, ccKey As String, repDescKey As String, xavPeriodKey As String, futurePeriodKey As String
-    Dim parts() As String, arrKeys As Variant
-    Dim XAVSheetName As String
+    ' Key variables
+    Dim key As String
+    Dim ccKey As String
+    Dim repDescKey As String
+    Dim xavPeriodKey As String
+    Dim futurePeriodKey As String
+    Dim parts() As String
+    Dim arrKeys As Variant
     
     ' Dictionary objects
     Dim dictAccountMap As Object
@@ -57,8 +97,10 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     Dim dictProcessed As Object
     Dim dictPeriodToCol As Object
     Dim dictDescToRow As Object
+    Dim rngCorner As Range
     
     ' Start macro
+    SubName = "PopulateFuture_5Blocks_WithProcessLog"
     Call WriteProcessLog(wsProcessLog, SubName & ": Started macro.")
     
     ' Clear existing data in FUTURE sheet cells that might be populated
@@ -67,7 +109,6 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     
     For idx = LBound(cornerCells) To UBound(cornerCells)
         cellRef = cornerCells(idx)
-        Dim rngCorner As Range
         Set rngCorner = wsFuture.Range(cellRef)
         
         If Not IsEmpty(rngCorner.Value) Then
@@ -199,16 +240,17 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     Set dictFinalDescMap = CreateObject("Scripting.Dictionary")
     dictFinalDescMap.CompareMode = vbTextCompare
     
-    For Each acctVal In dictAccountMap.Keys
-        desc2 = dictAccountMap(acctVal)
+    Dim keyVal As Variant
+    For Each keyVal In dictAccountMap.Keys
+        desc2 = dictAccountMap(keyVal)
         
         If dictDescMap.Exists(desc2) Then
-            dictFinalDescMap.Add acctVal, dictDescMap(desc2)
+            dictFinalDescMap.Add keyVal, dictDescMap(desc2)
         Else
             ' If no mapping exists in second map, use the original description
-            dictFinalDescMap.Add acctVal, desc2
+            dictFinalDescMap.Add keyVal, desc2
         End If
-    Next
+    Next keyVal
     
     Call WriteProcessLog(wsProcessLog, "Starting XAV summation with bonus logic...")
     
