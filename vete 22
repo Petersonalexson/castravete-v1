@@ -1,8 +1,25 @@
 Option Explicit
 
-Sub PopulateFuture_5Blocks_ReportDescription()
+Sub PopulateFuture_5Blocks_WithProcessLog()
     Dim wb As Workbook: Set wb = ThisWorkbook
     Dim wsGenerate As Worksheet: Set wsGenerate = wb.Sheets("Generate")
+    Dim wsAcctMap As Worksheet:  Set wsAcctMap = wb.Sheets("Account Mapping")
+    Dim wsFuture As Worksheet:   Set wsFuture = wb.Sheets("FUTURE")
+    Dim wsProcessLog As Worksheet: Set wsProcessLog = wb.Sheets("ProcessLog")
+    
+    Dim logRow As Long
+    Dim SubName As String
+    SubName = "PopulateFuture_5Blocks_WithProcessLog"
+    
+    Dim nextLogRow As Long
+    Sub WriteProcessLog(ByVal Msg As String)
+        nextLogRow = wsProcessLog.Cells(wsProcessLog.Rows.Count, "A").End(xlUp).Row + 1
+        wsProcessLog.Cells(nextLogRow, 1).Value = Now
+        wsProcessLog.Cells(nextLogRow, 2).Value = Msg
+    End Sub
+    
+    WriteProcessLog SubName & ": Started macro."
+    
     Dim XAVSheetName As String
     XAVSheetName = CStr(wsGenerate.Range("D7").Value)
     
@@ -12,12 +29,14 @@ Sub PopulateFuture_5Blocks_ReportDescription()
     On Error GoTo 0
     
     If wsXAV Is Nothing Then
-        MsgBox "Cannot find the XAV sheet named '" & XAVSheetName & "'. Check Generate!D7!", vbExclamation
+        WriteProcessLog "ERROR: Cannot find XAV sheet named '" & XAVSheetName & "'."
+        MsgBox "Cannot find XAV sheet named '" & XAVSheetName & "'. Check Generate!D7!", vbExclamation
         Exit Sub
+    Else
+        WriteProcessLog "Found XAV sheet: " & XAVSheetName
     End If
     
-    Dim wsAcctMap As Worksheet: Set wsAcctMap = wb.Sheets("Account Mapping")
-    Dim wsFuture As Worksheet:  Set wsFuture = wb.Sheets("FUTURE")
+    WriteProcessLog "Reading 'Account Mapping' for NAT Account --> Report Description..."
     
     Dim dictAccountMap As Object
     Set dictAccountMap = CreateObject("Scripting.Dictionary")
@@ -39,6 +58,10 @@ Sub PopulateFuture_5Blocks_ReportDescription()
             End If
         Next i
     End With
+    
+    WriteProcessLog "Account Mapping loaded. Total mappings: " & dictAccountMap.Count
+    
+    WriteProcessLog "Starting XAV summation with bonus logic..."
     
     Dim lastRowXAV As Long
     lastRowXAV = wsXAV.Cells(wsXAV.Rows.Count, "A").End(xlUp).Row
@@ -73,6 +96,7 @@ Sub PopulateFuture_5Blocks_ReportDescription()
             If dictAccountMap.Exists(natAccountVal) Then
                 repDescVal = dictAccountMap(natAccountVal)
             Else
+                WriteProcessLog "WARNING: NAT Account '" & natAccountVal & "' not in mapping. VoiceNum=" & voiceNum
                 GoTo SkipVoiceNum
             End If
             Dim thisPeriod As Variant
@@ -84,20 +108,31 @@ Sub PopulateFuture_5Blocks_ReportDescription()
             Else
                 dictResults.Add key, bonusTotal
             End If
+            WriteProcessLog "VoiceNum=" & voiceNum & " => CC=" & costCenter & ", Desc=" & repDescVal & ", Period=" & thisPeriod & ", Total=" & bonusTotal
 SkipVoiceNum:
         End If
     Next rowXAV
     
+    WriteProcessLog "Done summation. Total unique keys: " & dictResults.Count
+    
     Dim cornerCells As Variant
     cornerCells = Array("C6", "C22", "C38", "C54", "C70")
     
+    WriteProcessLog "Populating FUTURE in 5 blocks..."
+    
     Dim idx As Long
     For idx = LBound(cornerCells) To UBound(cornerCells)
+        Dim cellRef As String
+        cellRef = cornerCells(idx)
         Dim rngCorner As Range
-        Set rngCorner = wsFuture.Range(cornerCells(idx))
+        Set rngCorner = wsFuture.Range(cellRef)
         Dim blockCC As Variant
         blockCC = rngCorner.Value
-        If IsEmpty(blockCC) Or blockCC = "" Then GoTo NextCorner
+        If IsEmpty(blockCC) Then
+            WriteProcessLog "Block corner " & cellRef & " is empty, skipping."
+            GoTo NextCorner
+        End If
+        WriteProcessLog "Processing block corner " & cellRef & " => CC=" & blockCC
         
         Dim dictPeriodToCol As Object
         Set dictPeriodToCol = CreateObject("Scripting.Dictionary")
@@ -114,6 +149,8 @@ SkipVoiceNum:
             colPtr = colPtr + 1
         Loop
         
+        WriteProcessLog "Found " & dictPeriodToCol.Count & " period(s) to the right of " & cellRef
+        
         Dim dictDescToRow As Object
         Set dictDescToRow = CreateObject("Scripting.Dictionary")
         dictDescToRow.CompareMode = vbTextCompare
@@ -128,6 +165,8 @@ SkipVoiceNum:
             dictDescToRow(CStr(descVal)) = rowPtr
             rowPtr = rowPtr + 1
         Loop
+        
+        WriteProcessLog "Found " & dictDescToRow.Count & " Report Description(s) below " & cellRef
         
         Dim arrKeys As Variant
         arrKeys = dictResults.keys
@@ -150,11 +189,13 @@ SkipVoiceNum:
                     Dim totalVal As Double
                     totalVal = dictResults(arrKeys(k))
                     wsFuture.Cells(targetRow, targetCol).Value = totalVal
+                    WriteProcessLog "Wrote CC=" & blockCC & ", Desc=" & repDescKey & ", Period=" & periodKey & " => " & totalVal & " at R" & targetRow & "C" & targetCol
                 End If
             End If
         Next k
 NextCorner:
     Next idx
     
-    MsgBox "FUTURE sheet updated successfully for all 5 CC blocks!", vbInformation
+    WriteProcessLog SubName & ": Completed successfully!"
+    MsgBox "FUTURE sheet updated for all 5 CC blocks! See 'ProcessLog' for details.", vbInformation
 End Sub
