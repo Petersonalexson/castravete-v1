@@ -240,17 +240,22 @@ Public Sub PopulateFuture_5Blocks_WithProcessLog()
     Set dictFinalDescMap = CreateObject("Scripting.Dictionary")
     dictFinalDescMap.CompareMode = vbTextCompare
     
-    Dim keyVal As Variant
-    For Each keyVal In dictAccountMap.Keys
-        desc2 = dictAccountMap(keyVal)
+    ' Loop through each account in the account map
+    Dim acctKey As Variant
+    Dim allKeys As Variant
+    allKeys = dictAccountMap.Keys
+    
+    For i = 0 To dictAccountMap.Count - 1
+        acctKey = allKeys(i)
+        desc2 = dictAccountMap(acctKey)
         
         If dictDescMap.Exists(desc2) Then
-            dictFinalDescMap.Add keyVal, dictDescMap(desc2)
+            dictFinalDescMap.Add acctKey, dictDescMap(desc2)
         Else
             ' If no mapping exists in second map, use the original description
-            dictFinalDescMap.Add keyVal, desc2
+            dictFinalDescMap.Add acctKey, desc2
         End If
-    Next keyVal
+    Next i
     
     Call WriteProcessLog(wsProcessLog, "Starting XAV summation with bonus logic...")
     
@@ -363,7 +368,15 @@ SkipVoiceNum:
         
         ' Populate FUTURE cells from results dictionary
         arrKeys = dictResults.keys
-        For k = LBound(arrKeys) To UBound(arrKeys)
+        ' Handle potential error with array bounds
+        On Error Resume Next
+        For k = 0 To dictResults.Count - 1
+            If Err.Number <> 0 Then
+                Call WriteProcessLog(wsProcessLog, "ERROR: Problem accessing dictionary keys. Error " & Err.Number & ": " & Err.Description)
+                Err.Clear
+                Exit For
+            End If
+            
             parts = Split(arrKeys(k), "||")
             ccKey = parts(0)
             
