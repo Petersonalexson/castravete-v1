@@ -1,5 +1,13 @@
 Option Explicit
 
+' Procedure to write to process log
+Private Sub WriteProcessLog(ByRef wsProcessLog As Worksheet, ByVal Msg As String)
+    Dim nextLogRow As Long
+    nextLogRow = wsProcessLog.Cells(wsProcessLog.Rows.Count, "A").End(xlUp).Row + 1
+    wsProcessLog.Cells(nextLogRow, 1).Value = Now
+    wsProcessLog.Cells(nextLogRow, 2).Value = Msg
+End Sub
+
 Sub PopulateFuture_5Blocks_WithProcessLog()
     Dim wb As Workbook: Set wb = ThisWorkbook
     Dim wsGenerate As Worksheet: Set wsGenerate = wb.Sheets("Generate")
@@ -10,19 +18,10 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     Dim SubName As String
     SubName = "PopulateFuture_5Blocks_WithProcessLog"
     
-    Dim nextLogRow As Long
-    
-    ' Embedded function to write to process log
-    Sub WriteProcessLog(ByVal Msg As String)
-        nextLogRow = wsProcessLog.Cells(wsProcessLog.Rows.Count, "A").End(xlUp).Row + 1
-        wsProcessLog.Cells(nextLogRow, 1).Value = Now
-        wsProcessLog.Cells(nextLogRow, 2).Value = Msg
-    End Sub
-    
-    WriteProcessLog SubName & ": Started macro."
+    Call WriteProcessLog(wsProcessLog, SubName & ": Started macro.")
     
     ' Clear existing data in FUTURE sheet cells that might be populated
-    WriteProcessLog "Clearing existing data in target FUTURE cells..."
+    Call WriteProcessLog(wsProcessLog, "Clearing existing data in target FUTURE cells...")
     Dim cornerCells As Variant
     cornerCells = Array("C6", "C22", "C38", "C54", "C70")
     Dim idx As Long
@@ -56,7 +55,7 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
             ' Clear data area (but not headers)
             If endRow >= startRow And endCol >= startCol Then
                 wsFuture.Range(wsFuture.Cells(startRow, startCol), wsFuture.Cells(endRow, endCol)).ClearContents
-                WriteProcessLog "Cleared data for CC block at " & cellRef
+                Call WriteProcessLog(wsProcessLog, "Cleared data for CC block at " & cellRef)
             End If
         End If
     Next idx
@@ -72,11 +71,11 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     On Error GoTo 0
     
     If wsXAV Is Nothing Then
-        WriteProcessLog "ERROR: Cannot find XAV sheet named '" & XAVSheetName & "'."
+        Call WriteProcessLog(wsProcessLog, "ERROR: Cannot find XAV sheet named '" & XAVSheetName & "'.")
         MsgBox "Cannot find XAV sheet named '" & XAVSheetName & "'. Check Generate!D7!", vbExclamation
         Exit Sub
     Else
-        WriteProcessLog "Found XAV sheet: " & XAVSheetName
+        Call WriteProcessLog(wsProcessLog, "Found XAV sheet: " & XAVSheetName)
     End If
     
     ' Validate XAV sheet columns
@@ -85,7 +84,7 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
        wsXAV.Range("C1").Value <> "Account" Or _
        wsXAV.Range("N1").Value <> "voice num" Or _
        wsXAV.Range("O1").Value <> "amount" Then
-        WriteProcessLog "ERROR: XAV sheet headers don't match expected format."
+        Call WriteProcessLog(wsProcessLog, "ERROR: XAV sheet headers don't match expected format.")
         MsgBox "XAV sheet headers don't match expected format. Check if headers are: Fiscal Period(A1), CC(E1), Account(C1), voice num(N1), amount(O1)", vbExclamation
         Exit Sub
     End If
@@ -93,13 +92,13 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     ' Validate Account Mapping sheet columns
     If wsAcctMap.Range("B1").Value <> "Account" Or _
        wsAcctMap.Range("D1").Value <> "Description 2" Then
-        WriteProcessLog "ERROR: Account Mapping sheet headers don't match expected format."
+        Call WriteProcessLog(wsProcessLog, "ERROR: Account Mapping sheet headers don't match expected format.")
         MsgBox "Account Mapping sheet headers don't match expected format. Check if headers are: Account(B1), Description 2(D1)", vbExclamation
         Exit Sub
     End If
     
     ' Read Account Mapping (NAT Account --> Report Description)
-    WriteProcessLog "Reading 'Account Mapping' for Account --> Report Description..."
+    Call WriteProcessLog(wsProcessLog, "Reading 'Account Mapping' for Account --> Report Description...")
     
     Dim dictAccountMap As Object
     Set dictAccountMap = CreateObject("Scripting.Dictionary")
@@ -122,10 +121,10 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
         Next i
     End With
     
-    WriteProcessLog "Account Mapping loaded. Total mappings: " & dictAccountMap.Count
+    Call WriteProcessLog(wsProcessLog, "Account Mapping loaded. Total mappings: " & dictAccountMap.Count)
     
     ' Read reference mapping for XAV period to FUTURE column
-    WriteProcessLog "Reading period reference mapping..."
+    Call WriteProcessLog(wsProcessLog, "Reading period reference mapping...")
     
     Dim dictPeriodMap As Object
     Set dictPeriodMap = CreateObject("Scripting.Dictionary")
@@ -133,9 +132,6 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
     
     Dim lastRowPeriodMap As Long
     lastRowPeriodMap = wsAcctMap.Cells(wsAcctMap.Rows.Count, "F").End(xlUp).Row
-    
-    Dim skipHeader As Boolean
-    skipHeader = True
     
     For i = 2 To lastRowPeriodMap
         If Not IsEmpty(wsAcctMap.Range("F" & i).Value) And Not IsEmpty(wsAcctMap.Range("C" & i).Value) Then
@@ -149,10 +145,10 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
         End If
     Next i
     
-    WriteProcessLog "Period mapping loaded. Total mappings: " & dictPeriodMap.Count
+    Call WriteProcessLog(wsProcessLog, "Period mapping loaded. Total mappings: " & dictPeriodMap.Count)
     
     ' Read description mapping (Description 2 to FUTURE Description)
-    WriteProcessLog "Reading description mapping..."
+    Call WriteProcessLog(wsProcessLog, "Reading description mapping...")
     
     Dim dictDescMap As Object
     Set dictDescMap = CreateObject("Scripting.Dictionary")
@@ -176,13 +172,14 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
         End If
     Next i
     
-    WriteProcessLog "Description mapping loaded. Total mappings: " & dictDescMap.Count
+    Call WriteProcessLog(wsProcessLog, "Description mapping loaded. Total mappings: " & dictDescMap.Count)
     
     ' Create final mapping dictionary (Account to FUTURE Description)
     Dim dictFinalDescMap As Object
     Set dictFinalDescMap = CreateObject("Scripting.Dictionary")
     dictFinalDescMap.CompareMode = vbTextCompare
     
+    Dim acctVal As Variant
     For Each acctVal In dictAccountMap.Keys
         Dim desc2 As Variant
         desc2 = dictAccountMap(acctVal)
@@ -195,7 +192,7 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
         End If
     Next
     
-    WriteProcessLog "Starting XAV summation with bonus logic..."
+    Call WriteProcessLog(wsProcessLog, "Starting XAV summation with bonus logic...")
     
     Dim lastRowXAV As Long
     lastRowXAV = wsXAV.Cells(wsXAV.Rows.Count, "A").End(xlUp).Row
@@ -243,7 +240,7 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
             If dictFinalDescMap.Exists(accountVal) Then
                 repDescVal = dictFinalDescMap(accountVal)
             Else
-                WriteProcessLog "WARNING: Account '" & accountVal & "' not in mapping. VoiceNum=" & voiceNum
+                Call WriteProcessLog(wsProcessLog, "WARNING: Account '" & accountVal & "' not in mapping. VoiceNum=" & voiceNum)
                 GoTo SkipVoiceNum
             End If
             
@@ -252,7 +249,7 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
             
             ' Check if period exists in period mapping
             If Not dictPeriodMap.Exists(thisPeriod) Then
-                WriteProcessLog "WARNING: Period '" & thisPeriod & "' not in period mapping. VoiceNum=" & voiceNum
+                Call WriteProcessLog(wsProcessLog, "WARNING: Period '" & thisPeriod & "' not in period mapping. VoiceNum=" & voiceNum)
                 GoTo SkipVoiceNum
             End If
             
@@ -265,14 +262,14 @@ Sub PopulateFuture_5Blocks_WithProcessLog()
                 dictResults.Add key, bonusTotal
             End If
             
-            WriteProcessLog "VoiceNum=" & voiceNum & " => CC=" & costCenter & ", Desc=" & repDescVal & ", Period=" & thisPeriod & ", Total=" & bonusTotal
+            Call WriteProcessLog(wsProcessLog, "VoiceNum=" & voiceNum & " => CC=" & costCenter & ", Desc=" & repDescVal & ", Period=" & thisPeriod & ", Total=" & bonusTotal)
 SkipVoiceNum:
         End If
     Next rowXAV
     
-    WriteProcessLog "Done summation. Total unique keys: " & dictResults.Count
+    Call WriteProcessLog(wsProcessLog, "Done summation. Total unique keys: " & dictResults.Count)
     
-    WriteProcessLog "Populating FUTURE in 5 blocks..."
+    Call WriteProcessLog(wsProcessLog, "Populating FUTURE in 5 blocks...")
     
     ' Process each corner cell (CC block)
     For idx = LBound(cornerCells) To UBound(cornerCells)
@@ -282,11 +279,11 @@ SkipVoiceNum:
         blockCC = rngCorner.Value
         
         If IsEmpty(blockCC) Then
-            WriteProcessLog "Block corner " & cellRef & " is empty, skipping."
+            Call WriteProcessLog(wsProcessLog, "Block corner " & cellRef & " is empty, skipping.")
             GoTo NextCorner
         End If
         
-        WriteProcessLog "Processing block corner " & cellRef & " => CC=" & blockCC
+        Call WriteProcessLog(wsProcessLog, "Processing block corner " & cellRef & " => CC=" & blockCC)
         
         ' Map periods to columns
         Dim dictPeriodToCol As Object
@@ -305,7 +302,7 @@ SkipVoiceNum:
             colPtr = colPtr + 1
         Loop
         
-        WriteProcessLog "Found " & dictPeriodToCol.Count & " period(s) to the right of " & cellRef
+        Call WriteProcessLog(wsProcessLog, "Found " & dictPeriodToCol.Count & " period(s) to the right of " & cellRef)
         
         ' Map descriptions to rows
         Dim dictDescToRow As Object
@@ -324,7 +321,7 @@ SkipVoiceNum:
             rowPtr = rowPtr + 1
         Loop
         
-        WriteProcessLog "Found " & dictDescToRow.Count & " Report Description(s) below " & cellRef
+        Call WriteProcessLog(wsProcessLog, "Found " & dictDescToRow.Count & " Report Description(s) below " & cellRef)
         
         ' Populate FUTURE cells from results dictionary
         Dim arrKeys As Variant
@@ -348,7 +345,7 @@ SkipVoiceNum:
                 If dictPeriodMap.Exists(xavPeriodKey) Then
                     futurePeriodKey = dictPeriodMap(xavPeriodKey)
                 Else
-                    WriteProcessLog "WARNING: No period mapping for " & xavPeriodKey & " in CC=" & blockCC
+                    Call WriteProcessLog(wsProcessLog, "WARNING: No period mapping for " & xavPeriodKey & " in CC=" & blockCC)
                     GoTo NextKey
                 End If
                 
@@ -370,7 +367,7 @@ SkipVoiceNum:
                         wsFuture.Cells(targetRow, targetCol).Value = totalVal
                     End If
                     
-                    WriteProcessLog "Wrote CC=" & blockCC & ", Desc=" & repDescKey & ", Period=" & futurePeriodKey & " => " & totalVal & " at R" & targetRow & "C" & targetCol
+                    Call WriteProcessLog(wsProcessLog, "Wrote CC=" & blockCC & ", Desc=" & repDescKey & ", Period=" & futurePeriodKey & " => " & totalVal & " at R" & targetRow & "C" & targetCol)
                 End If
 NextKey:
             End If
@@ -379,7 +376,7 @@ NextCorner:
     Next idx
     
     ' Calculate totals if needed
-    WriteProcessLog "Calculating row and column totals..."
+    Call WriteProcessLog(wsProcessLog, "Calculating row and column totals...")
     For idx = LBound(cornerCells) To UBound(cornerCells)
         cellRef = cornerCells(idx)
         Set rngCorner = wsFuture.Range(cellRef)
@@ -469,6 +466,6 @@ NextCorner:
 NextCornerTotal:
     Next idx
     
-    WriteProcessLog SubName & ": Completed successfully!"
+    Call WriteProcessLog(wsProcessLog, SubName & ": Completed successfully!")
     MsgBox "FUTURE sheet updated for all 5 CC blocks! See 'ProcessLog' for details.", vbInformation
 End Sub
