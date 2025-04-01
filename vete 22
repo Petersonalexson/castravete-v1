@@ -1,0 +1,184 @@
+Option Explicit
+
+Sub PopulateFuture_UsingBlockLayout()
+    Dim wb As Workbook: Set wb = ThisWorkbook
+    Dim wsGenerate As Worksheet: Set wsGenerate = wb.Sheets("Generate")
+    Dim XAVSheetName As String
+    XAVSheetName = CStr(wsGenerate.Range("D7").Value)
+    
+    Dim wsXAV As Worksheet
+    On Error Resume Next
+    Set wsXAV = wb.Sheets(XAVSheetName)
+    On Error GoTo 0
+    
+    If wsXAV Is Nothing Then
+        MsgBox "Sheet '" & XAVSheetName & "' not found. Check Generate!D7.", vbExclamation
+        Exit Sub
+    End If
+    
+    Dim wsAcctMap As Worksheet: Set wsAcctMap = wb.Sheets("Account Mapping")
+    Dim wsFuture As Worksheet:  Set wsFuture = wb.Sheets("FUTURE")
+    
+    Dim dictAccountMap As Object
+    Set dictAccountMap = CreateObject("Scripting.Dictionary")
+    dictAccountMap.CompareMode = vbTextCompare
+    
+    Dim lastRowAcct As Long
+    With wsAcctMap
+        lastRowAcct = .Cells(.Rows.Count, "B").End(xlUp).Row
+        Dim i As Long
+        For i = 2 To lastRowAcct
+            Dim acctVal As Variant, desc2Val As Variant
+            acctVal = .Range("B" & i).Value
+            desc2Val = .Range("D" & i).Value
+            If Not IsEmpty(acctVal) And Not IsEmpty(desc2Val) Then
+                If Not dictAccountMap.Exists(acctVal) Then
+                    dictAccountMap.Add acctVal, desc2Val
+                End If
+            End If
+        Next i
+    End With
+    
+    Dim lastRowXAV As Long
+    With wsXAV
+        lastRowXAV = .Cells(.Rows.Count, "A").End(xlUp).Row
+    End With
+    
+    Dim dictResults As Object
+    Set dictResults = CreateObject("Scripting.Dictionary")
+    dictResults.CompareMode = vbTextCompare
+    
+    Dim dictProcessed As Object
+    Set dictProcessed = CreateObject("Scripting.Dictionary")
+    dictProcessed.CompareMode = vbTextCompare
+    
+    Dim rowXAV As Long
+    For rowXAV = 2 To lastRowXAV
+        Dim voiceNum As Variant
+        voiceNum = wsXAV.Range("N" & rowXAV).Value
+        If Not dictProcessed.Exists(voiceNum) Then
+            dictProcessed.Add voiceNum, True
+            Dim bonusTotal As Double: bonusTotal = 0
+            Dim rowXAV2 As Long
+            For rowXAV2 = 2 To lastRowXAV
+                If wsXAV.Range("N" & rowXAV2).Value = voiceNum Then
+                    bonusTotal = bonusTotal + CDbl(wsXAV.Range("O" & rowXAV2).Value)
+                End If
+            Next rowXAV2
+            
+            Dim costCenter As Variant
+            costCenter = wsXAV.Range("E" & rowXAV).Value
+            
+            Dim natAccount As Variant
+            natAccount = wsXAV.Range("C" & rowXAV).Value
+            
+            Dim desc2Val As Variant
+            If dictAccountMap.Exists(natAccount) Then
+                desc2Val = dictAccountMap(natAccount)
+            Else
+                GoTo SkipVoice
+            End If
+            
+            Dim thisPeriod As Variant
+            thisPeriod = wsXAV.Range("A" & rowXAV).Value
+            
+            Dim key As String
+            key = CStr(costCenter) & "||" & CStr(desc2Val) & "||" & CStr(thisPeriod)
+            
+            If dictResults.Exists(key) Then
+                dictResults(key) = dictResults(key) + bonusTotal
+            Else
+                dictResults.Add key, bonusTotal
+            End If
+SkipVoice:
+        End If
+    Next rowXAV
+    
+    Dim arrKeys As Variant
+    arrKeys = dictResults.keys
+    
+    Dim dictAllCC As Object: Set dictAllCC = CreateObject("Scripting.Dictionary")
+    dictAllCC.CompareMode = vbTextCompare
+    
+    Dim dictKey As Variant
+    For Each dictKey In arrKeys
+        Dim parts() As String
+        parts = Split(dictKey, "||")
+        Dim ccCode As String: ccCode = parts(0)
+        If Not dictAllCC.Exists(ccCode) Then
+            dictAllCC.Add ccCode, True
+        End If
+    Next dictKey
+    
+    Dim cc As Variant
+    For Each cc In dictAllCC.keys
+        Dim rngFound As Range
+        Set rngFound = FindCCinFuture(wsFuture, cc)
+        If Not rngFound Is Nothing Then
+            Dim topRow As Long, leftCol As Long
+            topRow = rngFound.Row
+            leftCol = rngFound.Column
+            
+            Dim dictPeriodToCol As Object
+            Set dictPeriodToCol = CreateObject("Scripting.Dictionary")
+            dictPeriodToCol.CompareMode = vbTextCompare
+            
+            Dim c As Long
+            c = leftCol + 1
+            Do While Not IsEmpty(wsFuture.Cells(topRow, c).Value)
+                Dim periodVal As Variant
+                periodVal = wsFuture.Cells(topRow, c).Value
+                dictPeriodToCol(CStr(periodVal)) = c
+                c = c + 1
+            Loop
+            
+            Dim dictDescToRow As Object
+            Set dictDescToRow = CreateObject("Scripting.Dictionary")
+            dictDescToRow.CompareMode = vbTextCompare
+            
+            Dim r As Long
+            r = topRow + 1
+            Do While Not IsEmpty(wsFuture.Cells(r, leftCol).Value)
+                Dim descVal As Variant
+                descVal = wsFuture.Cells(r, leftCol).Value
+                dictDescToRow(CStr(descVal)) = r
+                r = r + 1
+            Loop
+            
+            Dim keyItem As Variant
+            For Each keyItem In arrKeys
+                Dim subParts() As String
+                subParts = Split(keyItem, "||")
+                Dim ccKey As String:       ccKey = subParts(0)
+                Dim desc2Key As String:    desc2Key = subParts(1)
+                Dim periodKey As String:   periodKey = subParts(2)
+                
+                If ccKey = CStr(cc) Then
+                    If dictDescToRow.Exists(desc2Key) And dictPeriodToCol.Exists(periodKey) Then
+                        Dim targetRow As Long
+                        targetRow = dictDescToRow(desc2Key)
+                        Dim targetCol As Long
+                        targetCol = dictPeriodToCol(periodKey)
+                        Dim totalVal As Double
+                        totalVal = dictResults(keyItem)
+                        wsFuture.Cells(targetRow, targetCol).Value = totalVal
+                    End If
+                End If
+            Next keyItem
+        End If
+    Next cc
+    
+    MsgBox "FUTURE sheet updated successfully using block layout!", vbInformation
+End Sub
+
+Function FindCCinFuture(ByVal ws As Worksheet, ByVal CCtoFind As String) As Range
+    Dim rngFound As Range
+    With ws.UsedRange
+        Set rngFound = .Find(What:=CCtoFind, LookIn:=xlValues, LookAt:=xlWhole)
+    End With
+    If Not rngFound Is Nothing Then
+        Set FindCCinFuture = rngFound
+    Else
+        Set FindCCinFuture = Nothing
+    End If
+End Function
